@@ -40,8 +40,8 @@ def compute_asfr(ages, population, births):
     )
     df['asfr'] = df['births'] / df['population']
 
-    tfr = 5 * df['asfr'].sum()
-    print(f"Estimated TFR: {tfr:.2f}")
-    print("Total corrected births:", df['births'].sum())
-    print("Total female population 15–49:", df['population'].sum())
+#    tfr = 5 * df['asfr'].sum()
+#    print(f"Estimated TFR: {tfr:.2f}")
+#    print("Total corrected births:", df['births'].sum())
+#    print("Total female population 15–49:", df['population'].sum())
     return df
