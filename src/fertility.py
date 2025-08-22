@@ -39,6 +39,7 @@ def compute_asfr(ages, population, births):
         index=ages
     )
     df['asfr'] = df['births'] / df['population']
+    df['asfr'] = df['asfr'].fillna(0)
 
 #    tfr = 5 * df['asfr'].sum()
 #    print(f"Estimated TFR: {tfr:.2f}")

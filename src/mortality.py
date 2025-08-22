@@ -20,88 +20,127 @@ def make_lifetable(
     """
     Construct an abridged period life table with internal validation.
 
+    Uses the Andreev–Kingkade female formulas for a0 when you supply separate
+    0–1 and 1–4 intervals; otherwise uses the constant‐force analytic formula
+    on the single first interval [0,n].
+
     Parameters
     ----------
     ages : array-like or pandas Index/Series
-        Left-hand end-points of age intervals (0, 5, 10, …).
+        Left‐endpoints of age intervals (e.g. [0,1,5,10,…] or [0,5,10,…]).
     population, deaths : array-like or pandas Series
-        Exposed population and death counts aligned with `ages`.
-    radix : int, default 100_000
-        Cohort size at age 0.
-    open_interval_width : int, default 5
-        Width assumed for the last *open* interval when computing q_x.
+        Exposed‐to‐risk and death counts aligned with `ages`.
+    radix : int
+        Starting cohort size at age 0.
+    open_interval_width : int
+        Width for the final open interval.
 
     Returns
     -------
-    lifetable : pandas.DataFrame
-        Indexed by age with columns n, m_x, a_x, q_x, p_x, l_x, d_x, L_x, T_x, e_x.
+    DataFrame indexed by age, with columns
+    [n, mx, ax, qx, px, lx, dx, Lx, Tx, ex].
     """
 
-    # --- 1. Pre-processing --------------------------------------------------
+    # 1) Pre‐processing
     if isinstance(ages, (pd.Index, pd.Series)):
         ages = parse_age_labels(ages)
-
     df = pd.DataFrame({
-        "age": np.asarray(ages, dtype=float),
-        "population": np.asarray(population, dtype=float),
-        "deaths": np.asarray(deaths, dtype=float)
+        "age": np.asarray(ages, float),
+        "population": np.asarray(population, float),
+        "deaths": np.asarray(deaths, float)
     })
-
-    # Sort and aggregate duplicates (if any)
     df = (
         df.groupby("age", as_index=False)
           .sum()
           .sort_values("age")
           .reset_index(drop=True)
     )
-
-    # Validate strict monotonicity
     diffs = np.diff(df["age"].to_numpy())
     if not np.all(diffs > 0):
         raise ValueError("`ages` must be strictly increasing after sorting.")
 
-    # --- 2. Core computations ----------------------------------------------
-    df["n"] = np.append(diffs, open_interval_width)
-
-    # Central death rate
+    # 2) Core computations
+    df["n"]  = np.append(diffs, open_interval_width)
     df["mx"] = df["deaths"] / df["population"]
+    df["ax"] = 0.5 * df["n"]  # default: uniform within interval
 
-    # Approximate a_x
-    df["ax"] = 0.5 * df["n"]
-    #df.loc[df["age"] == 0, "ax"] = 0.1  # more accurate for infant mortality
+    # ——————————————————————————————
+    # Andreev–Kingkade a0 for female if you have 0–1 & 1–4:
+    if (
+        len(df) >= 3
+        and df.loc[0, "age"] == 0.0
+        and df.loc[1, "age"] == 1.0
+        and df.loc[2, "age"] == 5.0
+    ):
+        m0 = df.loc[0, "mx"]
+        if m0 < 0.01724:
+            df.loc[0, "ax"] = 0.14903 - 2.05527 * m0
+        elif m0 < 0.06891:
+            df.loc[0, "ax"] = 0.04667 + 3.88089 * m0
+        else:
+            df.loc[0, "ax"] = 0.31411
+        # leave a1 = n/2 for ages 1–4 (i.e. 2.0) or override if desired
 
-    # q_x with constraint q_x ≤ 1
-    df["qx"] = (df["n"] * df["mx"]) / (1 + (df["n"] - df["ax"]) * df["mx"])
+    # otherwise: constant‐force analytic for single [0,n]
+    else:
+        n0 = df.loc[0, "n"]
+        m0 = df.loc[0, "mx"]
+        if m0 > 0:
+            df.loc[0, "ax"] = (
+                1.0 / m0
+                - n0 * np.exp(-m0 * n0)
+                  / (1.0 - np.exp(-m0 * n0))
+            )
+
+    # qx, px
+    df["qx"] = (df["n"] * df["mx"]) / (1.0 + (df["n"] - df["ax"]) * df["mx"])
     df["qx"] = df["qx"].clip(upper=1.0)
-
     df["px"] = 1.0 - df["qx"]
 
-    # l_x   (survivors)
-    df["lx"] = np.nan  # ensure float dtype
+    # lx
+    df["lx"] = np.nan
     df.loc[0, "lx"] = float(radix)
-    df.loc[df.index[1:], "lx"] = float(radix) * df.loc[df.index[:-1], "px"].cumprod().to_numpy()
+    df.loc[1:, "lx"] = float(radix) * df["px"].iloc[:-1].cumprod().to_numpy()
 
-    # d_x
+    # dx, Lx
     df["dx"] = df["lx"] * df["qx"]
-
-    # L_x : person-years lived in interval
     df["Lx"] = df["n"] * df["lx"] - (df["n"] - df["ax"]) * df["dx"]
+    last = df.index[-1]
+    df.loc[last, "Lx"] = df.loc[last, "lx"] / df.loc[last, "mx"]
 
-    # Last interval: assume constant force of mortality
-    df.loc[df.index[-1], "Lx"] = df.loc[df.index[-1], "lx"] / df.loc[df.index[-1], "mx"]
-
-    # T_x  and e_x
+    # Tx, ex
     df["Tx"] = df["Lx"][::-1].cumsum()[::-1]
     df["ex"] = df["Tx"] / df["lx"]
 
-    # --- 3. Post-validation -------------------------------------------------
-    assert (df["n"] > 0).all(), "`n` must be positive."
-    assert (df["ax"].between(0, df["n"])).all(), "`ax` outside [0,n]."
-    assert (df["qx"].between(0, 1)).all(), "`qx` outside [0,1]."
-    assert (df["px"].between(0, 1)).all(), "`px` outside [0,1]."
-    assert (df["dx"] >= 0).all(), "`dx` negative."
+    # 3) Post‐validation
+    # Check n > 0
+    if not (df["n"] > 0).all():
+        print("Failing rows for `n` must be positive:")
+        print(df.loc[~(df["n"] > 0), ["n"]])
+        assert False, "`n` must be positive."
 
-    return (
-        df.drop(columns=["population", "deaths"])
-          .set_index("age")
-    )
+    # Check ax ∈ [0,n]
+    if not df["ax"].between(0, df["n"]).all():
+        print("Failing rows for `ax` outside [0,n]:")
+        print(df.loc[~df["ax"].between(0, df["n"]), ["ax", "n"]])
+        assert False, "`ax` outside [0,n]."
+
+    # Check qx ∈ [0,1]
+    if not df["qx"].between(0, 1).all():
+        print("Failing rows for `qx` outside [0,1]:")
+        print(df)
+        assert False, "`qx` outside [0,1]."
+
+    # Check px ∈ [0,1]
+    if not df["px"].between(0, 1).all():
+        print("Failing rows for `px` outside [0,1]:")
+        print(df.loc[~df["px"].between(0, 1), ["px"]])
+        assert False, "`px` outside [0,1]."
+
+    # Check dx ≥ 0
+    if not (df["dx"] >= 0).all():
+        print("Failing rows for `dx` negative:")
+        print(df.loc[~(df["dx"] >= 0), ["dx"]])
+        assert False, "`dx` negative."
+
+    return df.set_index("age")
