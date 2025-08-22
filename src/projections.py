@@ -2,6 +2,17 @@ import os
 import pandas as pd
 import numpy as np
 
+def save_projections(proj_F, proj_M, proj_T, sample_type, distribution, suffix):
+    base_proj_path = os.path.join('..', 'results', 'projections')
+    for df_struct, key in [(proj_F, 'age_structures_df_F'),
+                           (proj_M, 'age_structures_df_M'),
+                           (proj_T, 'age_structures_df_T')]:
+        out_path = os.path.join(base_proj_path, key, sample_type)
+        if distribution:
+            out_path = os.path.join(out_path, distribution)
+        os.makedirs(out_path, exist_ok=True)
+        df_struct.to_csv(os.path.join(out_path, f'{key}{suffix}.csv'))
+
 
 def save_LL(L_MM, L_MF, L_FF, label, DPTO, sample_type, distribution, suffix, year):
     base_proj_path = os.path.join('..', 'results', 'projections', DPTO)

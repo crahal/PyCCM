@@ -8,7 +8,7 @@ import os
 from multiprocessing import Pool, cpu_count
 from mortality import make_lifetable
 from fertility import compute_asfr
-from projections import make_projections, save_LL
+from projections import make_projections, save_LL, save_projections
 from data_loaders import load_all_data, correct_valor_for_omission, allocate_and_drop_missing_age
 
 def fill_missing_age_bins(s: pd.Series) -> pd.Series:
@@ -37,6 +37,7 @@ def fill_missing_age_bins(s: pd.Series) -> pd.Series:
 
 def main_wrapper(conteos, projection_range, sample_type, distribution=None, draw=None):
     DTPO_list = list(conteos['DPTO_NOMBRE'].unique()) + ['total_nacional']
+    suffix = f"_{draw}" if distribution is not None else ''
     proj_F = pd.DataFrame()
     proj_M = pd.DataFrame()
     proj_T = pd.DataFrame()
@@ -106,7 +107,6 @@ def main_wrapper(conteos, projection_range, sample_type, distribution=None, draw
             else:
                 lt_path = os.path.join('..', 'results', 'lifetables', DPTO, sample_type, distribution)
             os.makedirs(lt_path, exist_ok=True)
-            suffix = f"_{draw}" if distribution is not None else ''
             lt_M_t.to_csv(os.path.join(lt_path, f'lt_M_t{suffix}.csv'))
             lt_F_t.to_csv(os.path.join(lt_path, f'lt_F_t{suffix}.csv'))
             lt_T_t.to_csv(os.path.join(lt_path, f'lt_T_t{suffix}.csv'))
@@ -144,7 +144,9 @@ def main_wrapper(conteos, projection_range, sample_type, distribution=None, draw
             proj_F = pd.concat([proj_F, age_structures_df_F], axis=0, ignore_index=True, sort=False)
             proj_M = pd.concat([proj_M, age_structures_df_M], axis=0, ignore_index=True, sort=False)
             proj_T = pd.concat([proj_T, age_structures_df_T], axis=0, ignore_index=True, sort=False)
-    proj_F.to_csv('proj_f_temp.csv')
+
+    save_projections(proj_F, proj_M, proj_T, sample_type, distribution, suffix)
+
 
 if __name__ == '__main__':
     # Configuration
