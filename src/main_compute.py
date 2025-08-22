@@ -11,6 +11,7 @@ from fertility import compute_asfr
 from projections import make_projections, save_LL, save_projections
 from data_loaders import load_all_data, correct_valor_for_omission, allocate_and_drop_missing_age
 
+
 def fill_missing_age_bins(s: pd.Series) -> pd.Series:
     """
     Ensures that all expected age bins are present in the given Series.
@@ -41,111 +42,156 @@ def main_wrapper(conteos, projection_range, sample_type, distribution=None, draw
     proj_F = pd.DataFrame()
     proj_M = pd.DataFrame()
     proj_T = pd.DataFrame()
-    for year in projection_range:
-        for DPTO in DTPO_list:
-            print(year, DPTO)
-            if DPTO != 'total_nacional':
-                conteos_all = conteos[conteos['DPTO_NOMBRE'] == DPTO]
-            else:
-                conteos_all = conteos[conteos['DPTO_NOMBRE'] != DPTO]
-            if year>2023:
-                conteos_all = conteos_all[conteos_all['ANO'] == 2023]
-            else:
-                conteos_all = conteos_all[conteos_all['ANO'] == year]
-            conteos_all_M = conteos_all[conteos_all['SEXO'] == 1.0]
-            conteos_all_F = conteos_all[conteos_all['SEXO'] == 2.0]
+    for death_choice in ['EEVV', 'censo_2018', 'midpoint']:
+        for year in projection_range:
+            for DPTO in DTPO_list:
+                print(year, DPTO, death_choice)
+                if DPTO != 'total_nacional':
+                    conteos_all = conteos[conteos['DPTO_NOMBRE'] == DPTO]
+                else:
+                    conteos_all = conteos[conteos['DPTO_NOMBRE'] != DPTO]
+                conteos_all_M = conteos_all[conteos_all['SEXO'] == 1.0]
+                conteos_all_F = conteos_all[conteos_all['SEXO'] == 2.0]
+                if (death_choice == 'censo_2018'):
+                    conteos_all_M = conteos_all_M[conteos_all_M['ANO'] == 2018]
+                    conteos_all_M_d = conteos_all_M[(conteos_all_M['VARIABLE'] == 'defunciones') &
+                                                    (conteos_all_M['FUENTE'] == 'censo_2018')]
+                    conteos_all_F = conteos_all_F[conteos_all_F['ANO'] == 2018]
+                    conteos_all_F_d = conteos_all_F[(conteos_all_F['VARIABLE'] == 'defunciones') &
+                                                    (conteos_all_F['FUENTE'] == 'censo_2018')]
+                elif death_choice == 'EEVV':
+                    # use EEVV for deaths
+                   if year>2023:
+                        conteos_all_M = conteos_all_M[conteos_all_M['ANO'] == 2023]
+                        conteos_all_M_d = conteos_all_M[(conteos_all_M['VARIABLE'] == 'defunciones') &
+                                                        (conteos_all_M['FUENTE'] == 'EEVV')]
+                        conteos_all_F = conteos_all_F[conteos_all_F['ANO'] == 2023]
+                        conteos_all_F_d = conteos_all_F[(conteos_all_F['VARIABLE'] == 'defunciones') &
+                                                        (conteos_all_F['FUENTE'] == 'EEVV')]
+                   else:
+                       conteos_all_M = conteos_all_M[conteos_all_M['ANO'] == year]
+                       conteos_all_M_d = conteos_all_M[(conteos_all_M['VARIABLE'] == 'defunciones') &
+                                                       (conteos_all_M['FUENTE'] == 'EEVV')]
+                       conteos_all_F = conteos_all_F[conteos_all_F['ANO'] == year]
+                       conteos_all_F_d = conteos_all_F[(conteos_all_F['VARIABLE'] == 'defunciones') &
+                                                       (conteos_all_F['FUENTE'] == 'EEVV')]
+                elif death_choice == 'midpoint':
+                    # use midpoint between EEVV and censo_2018 for deaths
+                    conteos_all_M = conteos_all_M[conteos_all_M['ANO'] == 2018]
+                    conteos_all_F = conteos_all_F[conteos_all_F['ANO'] == 2018]
+                    conteos_all_M_d_1 = conteos_all_M[(conteos_all_M['VARIABLE'] == 'defunciones') &
+                                                      (conteos_all_M['FUENTE'] == 'EEVV')]
+                    conteos_all_F_d_1 = conteos_all_F[(conteos_all_F['VARIABLE'] == 'defunciones') &
+                                                      (conteos_all_F['FUENTE'] == 'EEVV')]
+                    conteos_all_M_d_2 = conteos_all_M[(conteos_all_M['VARIABLE'] == 'defunciones') &
+                                                      (conteos_all_M['FUENTE'] == 'censo_2018')]
+                    conteos_all_F_d_2 = conteos_all_F[(conteos_all_F['VARIABLE'] == 'defunciones') &
+                                                      (conteos_all_F['FUENTE'] == 'censo_2018')]
+                    conteos_all_M_d = pd.merge(conteos_all_M_d_1, conteos_all_M_d_2,
+                                               on=['DPTO_NOMBRE', 'SEXO', 'EDAD', 'ANO', 'VARIABLE'],
+                                               suffixes=('_EEVV', '_censo'))
+                    conteos_all_M_d['VALOR_corrected'] = 0.5 * (conteos_all_M_d['VALOR_corrected_EEVV'] +
+                                                                conteos_all_M_d['VALOR_corrected_censo'])
+                    conteos_all_M_d = conteos_all_M_d[['DPTO_NOMBRE', 'SEXO', 'EDAD', 'ANO', 'VARIABLE',
+                                                       'VALOR_corrected']]
+                    conteos_all_F_d = pd.merge(conteos_all_F_d_1, conteos_all_F_d_2,
+                                               on=['DPTO_NOMBRE', 'SEXO', 'EDAD', 'ANO', 'VARIABLE'],
+                                               suffixes=('_EEVV', '_censo'))
+                    conteos_all_F_d['VALOR_corrected'] = 0.5 * (conteos_all_F_d['VALOR_corrected_EEVV'] +
+                                                                conteos_all_F_d['VALOR_corrected_censo'])
+                    conteos_all_F_d = conteos_all_F_d[['DPTO_NOMBRE', 'SEXO', 'EDAD', 'ANO', 'VARIABLE',
+                                                       'VALOR_corrected']]
+                conteos_all_M_n = conteos_all_M[(conteos_all_M['VARIABLE'] == 'nacimientos') &
+                                                (conteos_all_M['FUENTE'] == 'EEVV')]
+                conteos_all_F_n = conteos_all_F[(conteos_all_F['VARIABLE'] == 'nacimientos') &
+                                                (conteos_all_F['FUENTE'] == 'EEVV')]
 
-            conteos_all_M_n = conteos_all_M[(conteos_all_M['VARIABLE'] == 'nacimientos') &
-                                            (conteos_all_M['FUENTE'] == 'EEVV')]
-            conteos_all_F_n = conteos_all_F[(conteos_all_F['VARIABLE'] == 'nacimientos') &
-                                            (conteos_all_F['FUENTE'] == 'EEVV')]
+                if year == 2018:
+                    conteos_all_M_p = conteos_all_M[(conteos_all_M['VARIABLE'] == 'poblacion_total') &
+                                                    (conteos_all_M['FUENTE'] == 'censo_2018')]
+                    conteos_all_F_p = conteos_all_F[(conteos_all_F['VARIABLE'] == 'poblacion_total') &
+                                                    (conteos_all_F['FUENTE'] == 'censo_2018')]
+                else:
+                    # USE PROJECTIONS FOR POPULATION
+                    conteos_all_F_p = proj_F[(proj_F['year'] == year) &
+                        (proj_F['DPTO_NOMBRE'] == DPTO) &
+                        (proj_M['death_choice'] == death_choice)]
+                    conteos_all_M_p = proj_M[(proj_M['year'] == year) &
+                        (proj_M['DPTO_NOMBRE'] == DPTO) &
+                        (proj_M['death_choice'] == death_choice)]
+                if DPTO == 'total_nacional':
+                    # Aggregate across all departments
+                    conteos_all_M_n_t = conteos_all_M_n.groupby(['EDAD'])['VALOR_corrected'].sum()
+                    conteos_all_F_n_t = conteos_all_F_n.groupby(['EDAD'])['VALOR_corrected'].sum()
+                    conteos_all_M_d_t = conteos_all_M_d.groupby(['EDAD'])['VALOR_corrected'].sum()
+                    conteos_all_F_d_t = conteos_all_F_d.groupby(['EDAD'])['VALOR_corrected'].sum()
+                    conteos_all_M_p_t = conteos_all_M_p.groupby(['EDAD'])['VALOR_corrected'].sum()
+                    conteos_all_F_p_t = conteos_all_F_p.groupby(['EDAD'])['VALOR_corrected'].sum()
+                else:
+                    # Use existing index-aligned series for each department
+                    conteos_all_M_n_t = conteos_all_M_n.set_index('EDAD')['VALOR_corrected']
+                    conteos_all_F_n_t = conteos_all_F_n.set_index('EDAD')['VALOR_corrected']
+                    conteos_all_M_d_t = conteos_all_M_d.set_index('EDAD')['VALOR_corrected']
+                    conteos_all_F_d_t = conteos_all_F_d.set_index('EDAD')['VALOR_corrected']
+                    conteos_all_M_p_t = conteos_all_M_p.set_index('EDAD')['VALOR_corrected']
+                    conteos_all_F_p_t = conteos_all_F_p.set_index('EDAD')['VALOR_corrected']
+                lt_M_t = make_lifetable(fill_missing_age_bins(conteos_all_M_d_t).index,
+                                        fill_missing_age_bins(conteos_all_M_p_t),
+                                        fill_missing_age_bins(conteos_all_M_d_t)
+                )
+                lt_F_t = make_lifetable(fill_missing_age_bins(conteos_all_F_d_t).index,
+                                        fill_missing_age_bins(conteos_all_F_p_t),
+                                        fill_missing_age_bins(conteos_all_F_d_t)
+                )
+                lt_T_t = make_lifetable(fill_missing_age_bins(conteos_all_M_d_t).index,
+                                        fill_missing_age_bins(conteos_all_M_p_t) + fill_missing_age_bins(conteos_all_F_p_t),
+                                        fill_missing_age_bins(conteos_all_M_d_t) + fill_missing_age_bins(conteos_all_F_d_t))
+                # Save lifetables
+                if distribution is None:
+                    lt_path = os.path.join('..', 'results', 'lifetables', DPTO, sample_type, death_choice)
+                else:
+                    lt_path = os.path.join('..', 'results', 'lifetables', DPTO, sample_type, death_choice, distribution)
+                os.makedirs(lt_path, exist_ok=True)
+                lt_M_t.to_csv(os.path.join(lt_path, f'lt_M_t{suffix}.csv'))
+                lt_F_t.to_csv(os.path.join(lt_path, f'lt_F_t{suffix}.csv'))
+                lt_T_t.to_csv(os.path.join(lt_path, f'lt_T_t{suffix}.csv'))
 
-            conteos_all_M_d = conteos_all_M[(conteos_all_M['VARIABLE'] == 'defunciones') &
-                                            (conteos_all_M['FUENTE'] == 'EEVV')]
-            conteos_all_F_d = conteos_all_F[(conteos_all_F['VARIABLE'] == 'defunciones') &
-                                            (conteos_all_F['FUENTE'] == 'EEVV')]
+                # Compute ASFR
+                asfr = compute_asfr(conteos_all_F_n_t.index,
+                                    pd.Series(conteos_all_F_p_t[
+                                    conteos_all_F_p_t.index.isin(conteos_all_F_n_t.index)]),
+                                    pd.Series(conteos_all_F_n_t) + pd.Series(conteos_all_M_n_t))
 
-            if year == 2018:
-                conteos_all_M_p = conteos_all_M[(conteos_all_M['VARIABLE'] == 'poblacion_total') &
-                                                (conteos_all_M['FUENTE'] == 'censo_2018')]
-                conteos_all_F_p = conteos_all_F[(conteos_all_F['VARIABLE'] == 'poblacion_total') &
-                                                (conteos_all_F['FUENTE'] == 'censo_2018')]
-            else:
-                # USE PROJECTIONS FOR POPULATION
-                conteos_all_F_p = proj_F[(proj_F['year'] == year) & (proj_F['DPTO_NOMBRE'] == DPTO)]
-                conteos_all_M_p = proj_M[(proj_M['year'] == year) & (proj_M['DPTO_NOMBRE'] == DPTO)]
-            if DPTO == 'total_nacional':
-                # Aggregate across all departments
-                conteos_all_M_n_t = conteos_all_M_n.groupby(['EDAD'])['VALOR_corrected'].sum()
-                conteos_all_F_n_t = conteos_all_F_n.groupby(['EDAD'])['VALOR_corrected'].sum()
-                conteos_all_M_d_t = conteos_all_M_d.groupby(['EDAD'])['VALOR_corrected'].sum()
-                conteos_all_F_d_t = conteos_all_F_d.groupby(['EDAD'])['VALOR_corrected'].sum()
-                conteos_all_M_p_t = conteos_all_M_p.groupby(['EDAD'])['VALOR_corrected'].sum()
-                conteos_all_F_p_t = conteos_all_F_p.groupby(['EDAD'])['VALOR_corrected'].sum()
-            else:
-                # Use existing index-aligned series for each department
-                conteos_all_M_n_t = conteos_all_M_n.set_index('EDAD')['VALOR_corrected']
-                conteos_all_F_n_t = conteos_all_F_n.set_index('EDAD')['VALOR_corrected']
-                conteos_all_M_d_t = conteos_all_M_d.set_index('EDAD')['VALOR_corrected']
-                conteos_all_F_d_t = conteos_all_F_d.set_index('EDAD')['VALOR_corrected']
-                conteos_all_M_p_t = conteos_all_M_p.set_index('EDAD')['VALOR_corrected']
-                conteos_all_F_p_t = conteos_all_F_p.set_index('EDAD')['VALOR_corrected']
-            lt_M_t = make_lifetable(fill_missing_age_bins(conteos_all_M_d_t).index,
-                                    fill_missing_age_bins(conteos_all_M_p_t),
-                                    fill_missing_age_bins(conteos_all_M_d_t)
-            )
-            lt_F_t = make_lifetable(fill_missing_age_bins(conteos_all_F_d_t).index,
-                                    fill_missing_age_bins(conteos_all_F_p_t),
-                                    fill_missing_age_bins(conteos_all_F_d_t)
-            )
-            lt_T_t = make_lifetable(fill_missing_age_bins(conteos_all_M_d_t).index,
-                                    fill_missing_age_bins(conteos_all_M_p_t) + fill_missing_age_bins(conteos_all_F_p_t),
-                                    fill_missing_age_bins(conteos_all_M_d_t) + fill_missing_age_bins(conteos_all_F_d_t))
-            # Save lifetables
-            if distribution is None:
-                lt_path = os.path.join('..', 'results', 'lifetables', DPTO, sample_type)
-            else:
-                lt_path = os.path.join('..', 'results', 'lifetables', DPTO, sample_type, distribution)
-            os.makedirs(lt_path, exist_ok=True)
-            lt_M_t.to_csv(os.path.join(lt_path, f'lt_M_t{suffix}.csv'))
-            lt_F_t.to_csv(os.path.join(lt_path, f'lt_F_t{suffix}.csv'))
-            lt_T_t.to_csv(os.path.join(lt_path, f'lt_T_t{suffix}.csv'))
+                # Save ASFR
+                if distribution is None:
+                    asfr_path = os.path.join('..', 'results', 'asfr', DPTO, sample_type)
+                else:
+                    asfr_path = os.path.join('..', 'results', 'asfr', DPTO, sample_type, distribution)
+                os.makedirs(asfr_path, exist_ok=True)
+                asfr.to_csv(os.path.join(asfr_path, f'asfr{suffix}.csv'))
 
-            # Compute ASFR
-            asfr = compute_asfr(conteos_all_F_n_t.index,
-                                pd.Series(conteos_all_F_p_t[
-                                conteos_all_F_p_t.index.isin(conteos_all_F_n_t.index)]),
-                                pd.Series(conteos_all_F_n_t) + pd.Series(conteos_all_M_n_t))
+                # Projections
+                _, _, _, age_structures_df_M, age_structures_df_F, age_structures_df_T = make_projections(
+                    len(lt_F_t) - 1, 1, 2,
+                    pd.Series(conteos_all_M_n_t),
+                    pd.Series(conteos_all_F_n_t),
+                    lt_F_t,
+                    lt_M_t,
+                    pd.Series(conteos_all_F_p_t),
+                    pd.Series(conteos_all_M_p_t),
+                    asfr,
+                    100000,
+                    year,
+                    DPTO,
+                    death_choice=death_choice
+                )
 
-            # Save ASFR
-            if distribution is None:
-                asfr_path = os.path.join('..', 'results', 'asfr', DPTO, sample_type)
-            else:
-                asfr_path = os.path.join('..', 'results', 'asfr', DPTO, sample_type, distribution)
-            os.makedirs(asfr_path, exist_ok=True)
-            asfr.to_csv(os.path.join(asfr_path, f'asfr{suffix}.csv'))
+                # Save age structures
+                proj_F = pd.concat([proj_F, age_structures_df_F], axis=0, ignore_index=True, sort=False)
+                proj_M = pd.concat([proj_M, age_structures_df_M], axis=0, ignore_index=True, sort=False)
+                proj_T = pd.concat([proj_T, age_structures_df_T], axis=0, ignore_index=True, sort=False)
 
-            # Projections
-            _, _, _, age_structures_df_M, age_structures_df_F, age_structures_df_T = make_projections(
-                len(lt_F_t) - 1, 1, 2,
-                pd.Series(conteos_all_M_n_t),
-                pd.Series(conteos_all_F_n_t),
-                lt_F_t,
-                lt_M_t,
-                pd.Series(conteos_all_F_p_t),
-                pd.Series(conteos_all_M_p_t),
-                asfr,
-                100000,
-                year,
-                DPTO
-            )
-
-            # Save age structures
-            proj_F = pd.concat([proj_F, age_structures_df_F], axis=0, ignore_index=True, sort=False)
-            proj_M = pd.concat([proj_M, age_structures_df_M], axis=0, ignore_index=True, sort=False)
-            proj_T = pd.concat([proj_T, age_structures_df_T], axis=0, ignore_index=True, sort=False)
-
-    save_projections(proj_F, proj_M, proj_T, sample_type, distribution, suffix)
+        save_projections(proj_F, proj_M, proj_T, sample_type, distribution, suffix, death_choice)
 
 
 if __name__ == '__main__':

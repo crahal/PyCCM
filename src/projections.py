@@ -2,7 +2,8 @@ import os
 import pandas as pd
 import numpy as np
 
-def save_projections(proj_F, proj_M, proj_T, sample_type, distribution, suffix):
+
+def save_projections(proj_F, proj_M, proj_T, sample_type, distribution, suffix, death_choice):
     base_proj_path = os.path.join('..', 'results', 'projections')
     for df_struct, key in [(proj_F, 'age_structures_df_F'),
                            (proj_M, 'age_structures_df_M'),
@@ -11,7 +12,7 @@ def save_projections(proj_F, proj_M, proj_T, sample_type, distribution, suffix):
         if distribution:
             out_path = os.path.join(out_path, distribution)
         os.makedirs(out_path, exist_ok=True)
-        df_struct.to_csv(os.path.join(out_path, f'{key}{suffix}.csv'))
+        df_struct.to_csv(os.path.join(out_path, f'{key}{suffix}{death_choice}.csv'))
 
 
 def save_LL(L_MM, L_MF, L_FF, label, DPTO, sample_type, distribution, suffix, year):
@@ -34,7 +35,8 @@ def make_projections(n, X, fert_start_idx,
                      asfr_2018,
                      l0,
                      year,
-                     DPTO):
+                     DPTO,
+                     death_choice):
     columns = [f't+{i}' for i in range(X + 1)]
     L_FF = np.zeros((n + 1, n + 1))
     L_MF = np.zeros((n + 1, n + 1))
@@ -82,6 +84,7 @@ def make_projections(n, X, fert_start_idx,
     n_proj_F = [n0_F]
     n_proj_M = [n0_M]
 
+    # @TODO modularlise this out
     mapper = {
         0: "0-4", 5: "5-9", 10: "10-14", 15: "15-19", 20: "20-24",
         25: "25-29", 30: "30-34", 35: "35-39", 40: "40-44", 45: "45-49",
@@ -108,20 +111,23 @@ def make_projections(n, X, fert_start_idx,
     age_structures_df_F = age_structures_df_F.rename(columns={'age': 'EDAD', 't+1': 'VALOR_corrected'})
     age_structures_df_F["EDAD"] = age_structures_df_F["EDAD"].map(mapper)
     age_structures_df_F['DPTO_NOMBRE'] = DPTO
-    age_structures_df_F = age_structures_df_F[['EDAD', 'DPTO_NOMBRE', 'year', 'VALOR_corrected']]
+    age_structures_df_F['death_choice'] = death_choice
+    age_structures_df_F = age_structures_df_F[['EDAD', 'DPTO_NOMBRE', 'year', 'VALOR_corrected', 'death_choice']]
 
     age_structures_df_M = age_structures_df_M.reset_index()
     age_structures_df_M['year'] = year+1
     age_structures_df_M = age_structures_df_M.rename(columns={'age': 'EDAD', 't+1': 'VALOR_corrected'})
     age_structures_df_M["EDAD"] = age_structures_df_M["EDAD"].map(mapper)
     age_structures_df_M['DPTO_NOMBRE'] = DPTO
-    age_structures_df_M = age_structures_df_M[['EDAD', 'DPTO_NOMBRE', 'year', 'VALOR_corrected']]
+    age_structures_df_M['death_choice'] = death_choice
+    age_structures_df_M = age_structures_df_M[['EDAD', 'DPTO_NOMBRE', 'year', 'VALOR_corrected', 'death_choice']]
 
     age_structures_df_T = age_structures_df_T.reset_index()
     age_structures_df_T['year'] = year+1
     age_structures_df_T = age_structures_df_T.rename(columns={'age': 'EDAD', 't+1': 'VALOR_corrected'})
     age_structures_df_T["EDAD"] = age_structures_df_T["EDAD"].map(mapper)
     age_structures_df_T['DPTO_NOMBRE'] = DPTO
-    age_structures_df_T = age_structures_df_T[['EDAD', 'DPTO_NOMBRE', 'year', 'VALOR_corrected']]
+    age_structures_df_T['death_choice'] = death_choice
+    age_structures_df_T = age_structures_df_T[['EDAD', 'DPTO_NOMBRE', 'year', 'VALOR_corrected', 'death_choice']]
 
     return L_MM, L_MF, L_FF, age_structures_df_M, age_structures_df_F, age_structures_df_T
