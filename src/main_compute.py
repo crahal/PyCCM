@@ -12,6 +12,32 @@ from projections import make_projections, save_LL, save_projections
 from data_loaders import load_all_data, correct_valor_for_omission, allocate_and_drop_missing_age
 
 
+def _bin_width(label: str) -> float:
+    """Width Δa of an age bin label like '15-19', '45-49', '80+'."""
+    s = str(label)
+    if '-' in s:
+        lo, hi = s.split('-')
+        return float(hi) - float(lo) + 1.0  # 14-10+1 = 5
+    if s.endswith('+'):
+        return 5.0
+    return 1.0
+
+def _widths_from_index(idx) -> np.ndarray:
+    return np.array([_bin_width(x) for x in idx], dtype=float)
+
+def _tfr_from_asfr_df(asfr_df: pd.DataFrame) -> float:
+    """Integrate the *asfr* column with bin widths Δa to get TFR."""
+    s = asfr_df['asfr'].astype(float)
+    widths = _widths_from_index(s.index)
+    return float(np.sum(s.values * widths))
+
+def _linear_tfr(TFR0: float, target: float, years: int, step: int) -> float:
+    """Linear path hitting target at exactly `years`."""
+    u = min(max(step / years, 0.0), 1.0)
+    return TFR0 + (target - TFR0) * u
+
+
+
 def fill_missing_age_bins(s: pd.Series) -> pd.Series:
     """
     Ensures that all expected age bins are present in the given Series.
@@ -42,6 +68,15 @@ def main_wrapper(conteos, projection_range, sample_type, distribution=None, draw
     proj_F = pd.DataFrame()
     proj_M = pd.DataFrame()
     proj_T = pd.DataFrame()
+
+    asfr_weights = {}      # key: (DPTO, death_choice) -> pd.Series w(a) with sum(w*Δa)=1
+    asfr_baseline = {}     # key -> dict(year=y0, TFR0=TFR0)
+
+    # choose the last observed year for births by source:
+    last_obs_year_by_death = {'EEVV': 2023, 'censo_2018': 2018, 'midpoint': 2018}
+
+    TFR_TARGET = 1.43
+    CONV_YEARS = 25
     for death_choice in ['EEVV', 'censo_2018', 'midpoint']:
         for year in projection_range:
             for DPTO in DTPO_list:
@@ -157,18 +192,58 @@ def main_wrapper(conteos, projection_range, sample_type, distribution=None, draw
                 lt_T_t.to_csv(os.path.join(lt_path, f'lt_T_t{suffix}.csv'))
 
                 # Compute ASFR
-                asfr = compute_asfr(conteos_all_F_n_t.index,
-                                    pd.Series(conteos_all_F_p_t[
-                                    conteos_all_F_p_t.index.isin(conteos_all_F_n_t.index)]),
-                                    pd.Series(conteos_all_F_n_t) + pd.Series(conteos_all_M_n_t))
+                cutoff = last_obs_year_by_death[death_choice]
+                key = (DPTO, death_choice)
 
-                # Save ASFR
+                # compute the observed DF (population, births, asfr)
+                asfr_df = compute_asfr(
+                    conteos_all_F_n_t.index,
+                    pd.Series(conteos_all_F_p_t[conteos_all_F_p_t.index.isin(conteos_all_F_n_t.index)]),
+                    pd.Series(conteos_all_F_n_t) + pd.Series(conteos_all_M_n_t)
+                )
+                # ensure dtype and ordering
+                asfr_df = asfr_df[['population', 'births', 'asfr']].astype(float)
+
+                if year <= cutoff:
+                    # OBSERVED: save as is; also (re)write frozen weights at the final observed year
+                    TFR0 = _tfr_from_asfr_df(asfr_df)
+                    if TFR0 <= 0 or not np.isfinite(TFR0):
+                        raise ValueError(f"TFR0 not positive/finite for {key} in year {year}")
+                    w = asfr_df['asfr'] / TFR0                # w(a), Σ w(a) Δa = 1
+                    asfr_weights[key] = w
+                    asfr_baseline[key] = {"year": year, "TFR0": TFR0}
+                    asfr = asfr_df                     # (series) for make_projections below
+                else:
+                    # PROJECTED: scale frozen weights by TFR_t, keep same DataFrame structure
+                    if key not in asfr_weights:
+                        raise KeyError(f"No baseline ASFR weights stored for {key}; "
+                                       f"did you process year {cutoff} first?")
+                    w = asfr_weights[key]
+                    base = asfr_baseline[key]
+                    step = year - base["year"]
+                    TFR_t = _linear_tfr(base["TFR0"], TFR_TARGET, CONV_YEARS, step)
+
+                    proj_df = asfr_df.copy()
+                    proj_df['population'] = np.nan           # keep columns, avoid invented counts
+                    proj_df['births'] = np.nan
+                    proj_df['asfr'] = (w * TFR_t).astype(float)
+
+                    # rigorous normalization check
+                    widths = _widths_from_index(proj_df.index)
+                    chk = float(np.sum(proj_df['asfr'].values * widths))
+                    if abs(chk - TFR_t) > 1e-6:
+                        raise AssertionError(f"Normalization failed for {key} year {year}: {chk} vs {TFR_t}")
+
+                    # save for I/O and pass just the Series to the projector
+                    asfr_df = proj_df
+                    asfr = proj_df
+                # Save ASFR (unchanged structure on disk)
                 if distribution is None:
                     asfr_path = os.path.join('..', 'results', 'asfr', DPTO, sample_type)
                 else:
                     asfr_path = os.path.join('..', 'results', 'asfr', DPTO, sample_type, distribution)
                 os.makedirs(asfr_path, exist_ok=True)
-                asfr.to_csv(os.path.join(asfr_path, f'asfr{suffix}.csv'))
+                asfr_df.to_csv(os.path.join(asfr_path, f'asfr{suffix}.csv'))
 
                 # Projections
                 _, _, _, age_structures_df_M, age_structures_df_F, age_structures_df_T = make_projections(
@@ -207,7 +282,7 @@ if __name__ == '__main__':
                 tasks.append(('draw', dist, label))
     else:
         print("We'll be running this without draws")
-    projection_range = range(2018, 2026)
+    projection_range = range(2018, 2044)
     # Load data
     data = load_all_data()
     conteos = data['conteos']
@@ -254,7 +329,7 @@ if __name__ == '__main__':
         return label
 
     # Parallel execution
-#    with Pool(processes=cpu_count()-1) as pool:
-    with Pool(1) as pool:
+    with Pool(processes=cpu_count()-1) as pool:
+#    with Pool(1) as pool:
         for _ in tqdm(pool.imap_unordered(_execute_task, tasks), total=len(tasks), desc='Tasks'):
             pass
