@@ -136,24 +136,53 @@ def main_wrapper(conteos, projection_range, sample_type, distribution=None, draw
                                                                 conteos_all_F_d['VALOR_corrected_censo'])
                     conteos_all_F_d = conteos_all_F_d[['DPTO_NOMBRE', 'SEXO', 'EDAD', 'ANO', 'VARIABLE',
                                                        'VALOR_corrected']]
+
+
+
                 conteos_all_M_n = conteos_all_M[(conteos_all_M['VARIABLE'] == 'nacimientos') &
                                                 (conteos_all_M['FUENTE'] == 'EEVV')]
                 conteos_all_F_n = conteos_all_F[(conteos_all_F['VARIABLE'] == 'nacimientos') &
                                                 (conteos_all_F['FUENTE'] == 'EEVV')]
 
-                if year == 2018:
+
+
+                if (death_choice == 'censo_2018') or (death_choice == 'midpoint'):
                     conteos_all_M_p = conteos_all_M[(conteos_all_M['VARIABLE'] == 'poblacion_total') &
                                                     (conteos_all_M['FUENTE'] == 'censo_2018')]
                     conteos_all_F_p = conteos_all_F[(conteos_all_F['VARIABLE'] == 'poblacion_total') &
                                                     (conteos_all_F['FUENTE'] == 'censo_2018')]
                 else:
-                    # USE PROJECTIONS FOR POPULATION
-                    conteos_all_F_p = proj_F[(proj_F['year'] == year) &
+                    if year == 2018:
+                        conteos_all_M_p = conteos_all_M[(conteos_all_M['VARIABLE'] == 'poblacion_total') &
+                                                        (conteos_all_M['FUENTE'] == 'censo_2018')]
+                        conteos_all_F_p = conteos_all_F[(conteos_all_F['VARIABLE'] == 'poblacion_total') &
+                                                        (conteos_all_F['FUENTE'] == 'censo_2018')]
+                    elif (year>2018 and year<=2023):
+                        # USE PROJECTIONS FOR POPULATION
+                        conteos_all_F_p = proj_F[(proj_F['year'] == year) &
+                            (proj_F['DPTO_NOMBRE'] == DPTO) &
+                            (proj_M['death_choice'] == death_choice)]
+                        conteos_all_M_p = proj_M[(proj_M['year'] == year) &
+                            (proj_M['DPTO_NOMBRE'] == DPTO) &
+                            (proj_M['death_choice'] == death_choice)]
+
+
+
+
+
+
+
+
+
+
+                if year>2018:
+                    conteos_all_F_p_updated = proj_F[(proj_F['year'] == year) &
                         (proj_F['DPTO_NOMBRE'] == DPTO) &
                         (proj_M['death_choice'] == death_choice)]
-                    conteos_all_M_p = proj_M[(proj_M['year'] == year) &
+                    conteos_all_M_p_updated = proj_M[(proj_M['year'] == year) &
                         (proj_M['DPTO_NOMBRE'] == DPTO) &
                         (proj_M['death_choice'] == death_choice)]
+
                 if DPTO == 'total_nacional':
                     # Aggregate across all departments
                     conteos_all_M_n_t = conteos_all_M_n.groupby(['EDAD'])['VALOR_corrected'].sum()
@@ -162,6 +191,9 @@ def main_wrapper(conteos, projection_range, sample_type, distribution=None, draw
                     conteos_all_F_d_t = conteos_all_F_d.groupby(['EDAD'])['VALOR_corrected'].sum()
                     conteos_all_M_p_t = conteos_all_M_p.groupby(['EDAD'])['VALOR_corrected'].sum()
                     conteos_all_F_p_t = conteos_all_F_p.groupby(['EDAD'])['VALOR_corrected'].sum()
+                    if year>2018:
+                        conteos_all_F_p_t_updated = conteos_all_F_p_updated.groupby(['EDAD'])['VALOR_corrected'].sum()
+                        conteos_all_M_p_t_updated = conteos_all_M_p_updated.groupby(['EDAD'])['VALOR_corrected'].sum()
                 else:
                     # Use existing index-aligned series for each department
                     conteos_all_M_n_t = conteos_all_M_n.set_index('EDAD')['VALOR_corrected']
@@ -170,6 +202,15 @@ def main_wrapper(conteos, projection_range, sample_type, distribution=None, draw
                     conteos_all_F_d_t = conteos_all_F_d.set_index('EDAD')['VALOR_corrected']
                     conteos_all_M_p_t = conteos_all_M_p.set_index('EDAD')['VALOR_corrected']
                     conteos_all_F_p_t = conteos_all_F_p.set_index('EDAD')['VALOR_corrected']
+                    if year>2018:
+                        conteos_all_M_p_t_updated = conteos_all_M_p_updated.set_index('EDAD')['VALOR_corrected']
+                        conteos_all_F_p_t_updated = conteos_all_F_p_updated.set_index('EDAD')['VALOR_corrected']
+
+
+#                print(conteos_all_M_d_t)
+#                print('****')
+#                print(conteos_all_M_p_t)
+#                print('****')
                 lt_M_t = make_lifetable(fill_missing_age_bins(conteos_all_M_d_t).index,
                                         fill_missing_age_bins(conteos_all_M_p_t),
                                         fill_missing_age_bins(conteos_all_M_d_t)
@@ -193,6 +234,7 @@ def main_wrapper(conteos, projection_range, sample_type, distribution=None, draw
 
                 # Compute ASFR
                 cutoff = last_obs_year_by_death[death_choice]
+                print(cutoff)
                 key = (DPTO, death_choice)
 
                 # compute the observed DF (population, births, asfr)
@@ -246,20 +288,37 @@ def main_wrapper(conteos, projection_range, sample_type, distribution=None, draw
                 asfr_df.to_csv(os.path.join(asfr_path, f'asfr{suffix}.csv'))
 
                 # Projections
-                _, _, _, age_structures_df_M, age_structures_df_F, age_structures_df_T = make_projections(
-                    len(lt_F_t) - 1, 1, 2,
-                    pd.Series(conteos_all_M_n_t),
-                    pd.Series(conteos_all_F_n_t),
-                    lt_F_t,
-                    lt_M_t,
-                    pd.Series(conteos_all_F_p_t),
-                    pd.Series(conteos_all_M_p_t),
-                    asfr,
-                    100000,
-                    year,
-                    DPTO,
-                    death_choice=death_choice
-                )
+                #
+                if year == 2018:
+                    _, _, _, age_structures_df_M, age_structures_df_F, age_structures_df_T = make_projections(
+                        len(lt_F_t) - 1, 1, 2,
+                        pd.Series(conteos_all_M_n_t),
+                        pd.Series(conteos_all_F_n_t),
+                        lt_F_t,
+                        lt_M_t,
+                        pd.Series(conteos_all_F_p_t),
+                        pd.Series(conteos_all_M_p_t),
+                        asfr,
+                        100000,
+                        year,
+                        DPTO,
+                        death_choice=death_choice
+                    )
+                else:
+                    _, _, _, age_structures_df_M, age_structures_df_F, age_structures_df_T = make_projections(
+                        len(lt_F_t) - 1, 1, 2,
+                        pd.Series(conteos_all_M_n_t),
+                        pd.Series(conteos_all_F_n_t),
+                        lt_F_t,
+                        lt_M_t,
+                        pd.Series(conteos_all_F_p_t_updated),
+                        pd.Series(conteos_all_M_p_t_updated),
+                        asfr,
+                        100000,
+                        year,
+                        DPTO,
+                        death_choice=death_choice
+                    )
 
                 # Save age structures
                 proj_F = pd.concat([proj_F, age_structures_df_F], axis=0, ignore_index=True, sort=False)
@@ -329,7 +388,7 @@ if __name__ == '__main__':
         return label
 
     # Parallel execution
-    with Pool(processes=cpu_count()-1) as pool:
-#    with Pool(1) as pool:
+#    with Pool(processes=cpu_count()-1) as pool:
+    with Pool(1) as pool:
         for _ in tqdm(pool.imap_unordered(_execute_task, tasks), total=len(tasks), desc='Tasks'):
             pass
