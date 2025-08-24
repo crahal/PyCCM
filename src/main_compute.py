@@ -65,9 +65,6 @@ def fill_missing_age_bins(s: pd.Series) -> pd.Series:
 def main_wrapper(conteos, projection_range, sample_type, distribution=None, draw=None):
     DTPO_list = list(conteos['DPTO_NOMBRE'].unique()) + ['total_nacional']
     suffix = f"_{draw}" if distribution is not None else ''
-    proj_F = pd.DataFrame()
-    proj_M = pd.DataFrame()
-    proj_T = pd.DataFrame()
 
     asfr_weights = {}      # key: (DPTO, death_choice) -> pd.Series w(a) with sum(w*Δa)=1
     asfr_baseline = {}     # key -> dict(year=y0, TFR0=TFR0)
@@ -78,9 +75,11 @@ def main_wrapper(conteos, projection_range, sample_type, distribution=None, draw
     TFR_TARGET = 1.43
     CONV_YEARS = 25
     for death_choice in ['EEVV', 'censo_2018', 'midpoint']:
+        proj_F = pd.DataFrame()
+        proj_M = pd.DataFrame()
+        proj_T = pd.DataFrame()
         for year in projection_range:
             for DPTO in DTPO_list:
-                print(year, DPTO, death_choice)
                 if DPTO != 'total_nacional':
                     conteos_all = conteos[conteos['DPTO_NOMBRE'] == DPTO]
                 else:
@@ -167,14 +166,6 @@ def main_wrapper(conteos, projection_range, sample_type, distribution=None, draw
                             (proj_M['death_choice'] == death_choice)]
 
 
-
-
-
-
-
-
-
-
                 if year>2018:
                     conteos_all_F_p_updated = proj_F[(proj_F['year'] == year) &
                         (proj_F['DPTO_NOMBRE'] == DPTO) &
@@ -206,11 +197,6 @@ def main_wrapper(conteos, projection_range, sample_type, distribution=None, draw
                         conteos_all_M_p_t_updated = conteos_all_M_p_updated.set_index('EDAD')['VALOR_corrected']
                         conteos_all_F_p_t_updated = conteos_all_F_p_updated.set_index('EDAD')['VALOR_corrected']
 
-
-#                print(conteos_all_M_d_t)
-#                print('****')
-#                print(conteos_all_M_p_t)
-#                print('****')
                 lt_M_t = make_lifetable(fill_missing_age_bins(conteos_all_M_d_t).index,
                                         fill_missing_age_bins(conteos_all_M_p_t),
                                         fill_missing_age_bins(conteos_all_M_d_t)
@@ -224,9 +210,9 @@ def main_wrapper(conteos, projection_range, sample_type, distribution=None, draw
                                         fill_missing_age_bins(conteos_all_M_d_t) + fill_missing_age_bins(conteos_all_F_d_t))
                 # Save lifetables
                 if distribution is None:
-                    lt_path = os.path.join('..', 'results', 'lifetables', DPTO, sample_type, death_choice)
+                    lt_path = os.path.join('..', 'results', 'lifetables', DPTO, sample_type, death_choice, str(year))
                 else:
-                    lt_path = os.path.join('..', 'results', 'lifetables', DPTO, sample_type, death_choice, distribution)
+                    lt_path = os.path.join('..', 'results', 'lifetables', DPTO, sample_type, death_choice, distribution, str(year))
                 os.makedirs(lt_path, exist_ok=True)
                 lt_M_t.to_csv(os.path.join(lt_path, f'lt_M_t{suffix}.csv'))
                 lt_F_t.to_csv(os.path.join(lt_path, f'lt_F_t{suffix}.csv'))
@@ -234,7 +220,6 @@ def main_wrapper(conteos, projection_range, sample_type, distribution=None, draw
 
                 # Compute ASFR
                 cutoff = last_obs_year_by_death[death_choice]
-                print(cutoff)
                 key = (DPTO, death_choice)
 
                 # compute the observed DF (population, births, asfr)
@@ -281,16 +266,16 @@ def main_wrapper(conteos, projection_range, sample_type, distribution=None, draw
                     asfr = proj_df
                 # Save ASFR (unchanged structure on disk)
                 if distribution is None:
-                    asfr_path = os.path.join('..', 'results', 'asfr', DPTO, sample_type)
+                    asfr_path = os.path.join('..', 'results', 'asfr', DPTO, sample_type, str(year))
                 else:
-                    asfr_path = os.path.join('..', 'results', 'asfr', DPTO, sample_type, distribution)
+                    asfr_path = os.path.join('..', 'results', 'asfr', DPTO, sample_type, distribution, str(year))
                 os.makedirs(asfr_path, exist_ok=True)
                 asfr_df.to_csv(os.path.join(asfr_path, f'asfr{suffix}.csv'))
 
                 # Projections
                 #
                 if year == 2018:
-                    _, _, _, age_structures_df_M, age_structures_df_F, age_structures_df_T = make_projections(
+                     L_MM, L_MF, L_FF, age_structures_df_M, age_structures_df_F, age_structures_df_T = make_projections(
                         len(lt_F_t) - 1, 1, 2,
                         pd.Series(conteos_all_M_n_t),
                         pd.Series(conteos_all_F_n_t),
@@ -305,7 +290,7 @@ def main_wrapper(conteos, projection_range, sample_type, distribution=None, draw
                         death_choice=death_choice
                     )
                 else:
-                    _, _, _, age_structures_df_M, age_structures_df_F, age_structures_df_T = make_projections(
+                    L_MM, L_MF, L_FF, age_structures_df_M, age_structures_df_F, age_structures_df_T = make_projections(
                         len(lt_F_t) - 1, 1, 2,
                         pd.Series(conteos_all_M_n_t),
                         pd.Series(conteos_all_F_n_t),
@@ -319,13 +304,13 @@ def main_wrapper(conteos, projection_range, sample_type, distribution=None, draw
                         DPTO,
                         death_choice=death_choice
                     )
-
+                save_LL(L_MM, L_MF, L_FF, death_choice, DPTO, sample_type, distribution, suffix, year)
                 # Save age structures
                 proj_F = pd.concat([proj_F, age_structures_df_F], axis=0, ignore_index=True, sort=False)
                 proj_M = pd.concat([proj_M, age_structures_df_M], axis=0, ignore_index=True, sort=False)
                 proj_T = pd.concat([proj_T, age_structures_df_T], axis=0, ignore_index=True, sort=False)
 
-        save_projections(proj_F, proj_M, proj_T, sample_type, distribution, suffix, death_choice)
+        save_projections(proj_F, proj_M, proj_T, sample_type, distribution, suffix, death_choice, year)
 
 
 if __name__ == '__main__':
@@ -341,7 +326,7 @@ if __name__ == '__main__':
                 tasks.append(('draw', dist, label))
     else:
         print("We'll be running this without draws")
-    projection_range = range(2018, 2044)
+    projection_range = range(2018, 2070)
     # Load data
     data = load_all_data()
     conteos = data['conteos']
@@ -388,7 +373,7 @@ if __name__ == '__main__':
         return label
 
     # Parallel execution
-#    with Pool(processes=cpu_count()-1) as pool:
-    with Pool(1) as pool:
+    with Pool(processes=cpu_count()-1) as pool:
+#    with Pool(1) as pool:
         for _ in tqdm(pool.imap_unordered(_execute_task, tasks), total=len(tasks), desc='Tasks'):
             pass
