@@ -8,6 +8,7 @@ import os
 from multiprocessing import Pool, cpu_count
 from mortality import make_lifetable
 from fertility import compute_asfr
+from migration import create_migration_frame
 from projections import make_projections, save_LL, save_projections
 from data_loaders import load_all_data, correct_valor_for_omission, allocate_and_drop_missing_age
 
@@ -119,8 +120,7 @@ def fill_missing_age_bins(s: pd.Series) -> pd.Series:
     return s.reindex(expected_bins, fill_value=0)
 
 
-
-def main_wrapper(conteos, projection_range, sample_type, distribution=None, draw=None):
+def main_wrapper(conteos, emi, imi, projection_range, sample_type, distribution=None, draw=None):
     DTPO_list = list(conteos['DPTO_NOMBRE'].unique()) + ['total_nacional']
     suffix = f"_{draw}" if distribution is not None else ''
 
@@ -218,7 +218,7 @@ def main_wrapper(conteos, projection_range, sample_type, distribution=None, draw
                         # USE PROJECTIONS FOR POPULATION
                         conteos_all_F_p = proj_F[(proj_F['year'] == year) &
                             (proj_F['DPTO_NOMBRE'] == DPTO) &
-                            (proj_M['death_choice'] == death_choice)]
+                            (proj_F['death_choice'] == death_choice)]
                         conteos_all_M_p = proj_M[(proj_M['year'] == year) &
                             (proj_M['DPTO_NOMBRE'] == DPTO) &
                             (proj_M['death_choice'] == death_choice)]
@@ -227,7 +227,7 @@ def main_wrapper(conteos, projection_range, sample_type, distribution=None, draw
                 if year>2018:
                     conteos_all_F_p_updated = proj_F[(proj_F['year'] == year) &
                         (proj_F['DPTO_NOMBRE'] == DPTO) &
-                        (proj_M['death_choice'] == death_choice)]
+                        (proj_F['death_choice'] == death_choice)]
                     conteos_all_M_p_updated = proj_M[(proj_M['year'] == year) &
                         (proj_M['DPTO_NOMBRE'] == DPTO) &
                         (proj_M['death_choice'] == death_choice)]
@@ -255,26 +255,102 @@ def main_wrapper(conteos, projection_range, sample_type, distribution=None, draw
                         conteos_all_M_p_t_updated = conteos_all_M_p_updated.set_index('EDAD')['VALOR_corrected']
                         conteos_all_F_p_t_updated = conteos_all_F_p_updated.set_index('EDAD')['VALOR_corrected']
 
-                lt_M_t = make_lifetable(fill_missing_age_bins(conteos_all_M_d_t).index,
-                                        fill_missing_age_bins(conteos_all_M_p_t),
-                                        fill_missing_age_bins(conteos_all_M_d_t)
-                )
-                lt_F_t = make_lifetable(fill_missing_age_bins(conteos_all_F_d_t).index,
-                                        fill_missing_age_bins(conteos_all_F_p_t),
-                                        fill_missing_age_bins(conteos_all_F_d_t)
-                )
-                lt_T_t = make_lifetable(fill_missing_age_bins(conteos_all_M_d_t).index,
-                                        fill_missing_age_bins(conteos_all_M_p_t) + fill_missing_age_bins(conteos_all_F_p_t),
-                                        fill_missing_age_bins(conteos_all_M_d_t) + fill_missing_age_bins(conteos_all_F_d_t))
-                # Save lifetables
-                if distribution is None:
-                    lt_path = os.path.join('..', 'results', 'lifetables', DPTO, sample_type, death_choice, str(year))
-                else:
-                    lt_path = os.path.join('..', 'results', 'lifetables', DPTO, sample_type, death_choice, distribution, str(year))
-                os.makedirs(lt_path, exist_ok=True)
-                lt_M_t.to_csv(os.path.join(lt_path, f'lt_M_t{suffix}.csv'))
-                lt_F_t.to_csv(os.path.join(lt_path, f'lt_F_t{suffix}.csv'))
-                lt_T_t.to_csv(os.path.join(lt_path, f'lt_T_t{suffix}.csv'))
+
+
+                if year == 2018:
+                    edad_order = ['0-4','5-9','10-14','15-19','20-24','25-29',
+                                '30-34','35-39','40-44','45-49','50-54','55-59',
+                                '60-64','65-69','70-74','75-79','80+']
+                    lhs_M = (pd.Series(conteos_all_M_p_t)
+                        .reindex(edad_order, fill_value=0)
+                        .astype(float)
+                        .rename('lhs'))
+                    rhs_M = (conteos[(conteos['DPTO_NOMBRE'] != 'total_nacional') &
+                        (conteos['SEXO'] == 1) &
+                        (conteos['ANO'] == 2018) &
+                        (conteos['VARIABLE'] == 'poblacion_total') &
+                        (conteos['FUENTE'] == 'censo_2018')]
+                        .groupby('EDAD')['VALOR_corrected'].sum()
+                        .reindex(edad_order, fill_value=0)
+                        .astype(float)
+                        .rename('rhs'))
+                    ratio_M = lhs_M.div(rhs_M.replace(0, np.nan))
+
+                    lhs_F = (pd.Series(conteos_all_F_p_t)
+                        .reindex(edad_order, fill_value=0)
+                        .astype(float)
+                        .rename('lhs'))
+                    rhs_F = (conteos[(conteos['DPTO_NOMBRE'] != 'total_nacional') &
+                        (conteos['SEXO'] == 2) &
+                        (conteos['ANO'] == 2018) &
+                        (conteos['VARIABLE'] == 'poblacion_total') &
+                        (conteos['FUENTE'] == 'censo_2018')]
+                        .groupby('EDAD')['VALOR_corrected'].sum()
+                        .reindex(edad_order, fill_value=0)
+                        .astype(float)
+                        .rename('rhs'))
+                    ratio_F = lhs_F.div(rhs_F.replace(0, np.nan))
+
+                elif year <= 2021:
+
+                    lhs_M = (pd.Series(conteos_all_M_p_t)
+                        .reindex(edad_order, fill_value=0)
+                        .astype(float)
+                        .rename('lhs'))
+                    rhs_M = proj_M[(proj_M['year'] == year) &
+                        (proj_M['DPTO_NOMBRE'] == 'total_nacional') &
+                        (proj_M['death_choice'] == death_choice)].set_index('EDAD')['VALOR_corrected']
+                    ratio_M = lhs_M.div(rhs_M.replace(0, np.nan))
+
+                    lhs_F = (pd.Series(conteos_all_F_p_t)
+                        .reindex(edad_order, fill_value=0)
+                        .astype(float)
+                        .rename('lhs'))
+                    rhs_F = proj_F[(proj_F['year'] == year) &
+                        (proj_F['DPTO_NOMBRE'] == 'total_nacional') &
+                        (proj_F['death_choice'] == death_choice)].set_index('EDAD')['VALOR_corrected']
+                    ratio_F = lhs_F.div(rhs_F.replace(0, np.nan))
+
+
+                imi_age_M = (imi.loc[(imi['ANO']==year) & (imi['SEXO']==1)]
+                            .groupby('EDAD')['VALOR'].sum()
+                            .reindex(edad_order, fill_value=0))
+                emi_age_M = (emi.loc[(emi['ANO']==year) & (emi['SEXO']==1)]
+                            .groupby('EDAD')['VALOR'].sum()
+                            .reindex(edad_order, fill_value=0))
+                net_M = imi_age_M - emi_age_M
+                net_M = ratio_M*net_M
+
+                imi_age_F = (imi.loc[(imi['ANO']==year) & (imi['SEXO']==2)]
+                            .groupby('EDAD')['VALOR'].sum()
+                            .reindex(edad_order, fill_value=0))
+                emi_age_F = (emi.loc[(emi['ANO']==year) & (emi['SEXO']==2)]
+                            .groupby('EDAD')['VALOR'].sum()
+                            .reindex(edad_order, fill_value=0))
+                net_F = imi_age_F - emi_age_F
+                net_F = ratio_F*net_F
+
+                if ((death_choice == 'EEVV') and (year < 2024)) or ((death_choice != 'EEV') and (year == 2018)):
+                    lt_M_t = make_lifetable(fill_missing_age_bins(conteos_all_M_d_t).index,
+                                            fill_missing_age_bins(conteos_all_M_p_t),
+                                            fill_missing_age_bins(conteos_all_M_d_t)
+                    )
+                    lt_F_t = make_lifetable(fill_missing_age_bins(conteos_all_F_d_t).index,
+                                            fill_missing_age_bins(conteos_all_F_p_t),
+                                            fill_missing_age_bins(conteos_all_F_d_t)
+                    )
+                    lt_T_t = make_lifetable(fill_missing_age_bins(conteos_all_M_d_t).index,
+                                            fill_missing_age_bins(conteos_all_M_p_t) + fill_missing_age_bins(conteos_all_F_p_t),
+                                            fill_missing_age_bins(conteos_all_M_d_t) + fill_missing_age_bins(conteos_all_F_d_t))
+                    # Save lifetables
+                    if distribution is None:
+                        lt_path = os.path.join('..', 'results', 'lifetables', DPTO, sample_type, death_choice, str(year))
+                    else:
+                        lt_path = os.path.join('..', 'results', 'lifetables', DPTO, sample_type, death_choice, distribution, str(year))
+                    os.makedirs(lt_path, exist_ok=True)
+                    lt_M_t.to_csv(os.path.join(lt_path, f'lt_M_t{suffix}.csv'))
+                    lt_F_t.to_csv(os.path.join(lt_path, f'lt_F_t{suffix}.csv'))
+                    lt_T_t.to_csv(os.path.join(lt_path, f'lt_T_t{suffix}.csv'))
 
                 # Compute ASFR
                 cutoff = last_obs_year_by_death[death_choice]
@@ -335,21 +411,23 @@ def main_wrapper(conteos, projection_range, sample_type, distribution=None, draw
                 #
                 if year == 2018:
                      L_MM, L_MF, L_FF, age_structures_df_M, age_structures_df_F, age_structures_df_T = make_projections(
-                        len(lt_F_t) - 1, 1, 2,
-                        pd.Series(conteos_all_M_n_t),
-                        pd.Series(conteos_all_F_n_t),
-                        lt_F_t,
-                        lt_M_t,
-                        pd.Series(conteos_all_F_p_t),
-                        pd.Series(conteos_all_M_p_t),
-                        asfr,
-                        100000,
-                        year,
-                        DPTO,
-                        death_choice=death_choice
-                    )
+                         net_F, net_M,
+                         len(lt_F_t) - 1, 1, 2,
+                         pd.Series(conteos_all_M_n_t),
+                         pd.Series(conteos_all_F_n_t),
+                         lt_F_t,
+                         lt_M_t,
+                         pd.Series(conteos_all_F_p_t),
+                         pd.Series(conteos_all_M_p_t),
+                         asfr,
+                         100000,
+                         year,
+                         DPTO,
+                         death_choice=death_choice
+                     )
                 else:
                     L_MM, L_MF, L_FF, age_structures_df_M, age_structures_df_F, age_structures_df_T = make_projections(
+                        net_F, net_M,
                         len(lt_F_t) - 1, 1, 2,
                         pd.Series(conteos_all_M_n_t),
                         pd.Series(conteos_all_F_n_t),
@@ -389,6 +467,8 @@ if __name__ == '__main__':
     # Load data
     data = load_all_data()
     conteos = data['conteos']
+    emi = conteos[conteos['VARIABLE']=='crt_tipo_mov_emigracion']
+    imi = conteos[conteos['VARIABLE']=='crt_tipo_mov_inmigracion']
     # Prepare tasks
     tasks = [
         ('mid', None, 'mid_omissions'),
@@ -426,13 +506,13 @@ if __name__ == '__main__':
         df = pd.concat(processed_subsets, axis=0, ignore_index=True)
         df = df[df['EDAD'].notna()].copy()
         if dist is None:
-            main_wrapper(df, projection_range, label)
+            main_wrapper(df, emi, imi, projection_range, label)
         else:
-            main_wrapper(df, projection_range, 'draw', dist, label)
+            main_wrapper(df, emi, imi, projection_range, 'draw', dist, label)
         return label
 
     # Parallel execution
-    with Pool(processes=cpu_count()-5) as pool:
-#    with Pool(1) as pool:
+#    with Pool(processes=cpu_count()-5) as pool:
+    with Pool(1) as pool:
         for _ in tqdm(pool.imap_unordered(_execute_task, tasks), total=len(tasks), desc='Tasks'):
             pass

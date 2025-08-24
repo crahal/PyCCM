@@ -52,6 +52,7 @@ def _hazard_from_survival(s: float, step: float) -> float:
 # ------------------------------- main projector -------------------------------
 
 def make_projections(
+    net_F, net_M,
     n, X, fert_start_idx,
     conteos_all_2018_M_n_t,   # births, male
     conteos_all_2018_F_n_t,   # births, female
@@ -191,9 +192,9 @@ def make_projections(
             L_FF[0, col] = p_f * S0_t * births_per_woman[j]
             L_MF[0, col] = p_m * S0_t * births_per_woman[j]
 
-        # one-step advance
-        n_next_F = L_FF @ n_proj_F[-1]
-        n_next_M = (L_MM @ n_proj_M[-1]) + (L_MF @ n_proj_F[-1])
+
+        n_next_F = (L_FF @ (n_proj_F[-1] + (net_F/2))) + (net_F/2)
+        n_next_M = (L_FF @ (n_proj_M[-1] + (net_M/2))) + (n_proj_M[-1]+ (net_M/2)) + (L_MF @ (n_proj_F[-1] + (net_M/2)))
         n_proj_F.append(n_next_F)
         n_proj_M.append(n_next_M)
 
