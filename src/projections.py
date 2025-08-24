@@ -1,6 +1,7 @@
 import os
-import pandas as pd
+import re
 import numpy as np
+import pandas as pd
 
 
 def save_projections(proj_F, proj_M, proj_T, sample_type, distribution, suffix, death_choice, year):
@@ -25,9 +26,30 @@ def save_LL(L_MM, L_MF, L_FF, death_choice, DPTO, sample_type, distribution, suf
         pd.DataFrame(mat).to_csv(os.path.join(out_path, f'{label}{suffix}{year}.csv'))
 
 
-import numpy as np
-import pandas as pd
-import re
+# --------------------------- helpers for mortality ----------------------------
+
+def _s_open_from_ex(step: float, e: float) -> float:
+    """
+    Closed-form survival over one interval in the open age group, assuming a
+    constant force of mortality m and remaining life expectancy e at the open age.
+    If e<=0 or not finite, returns 0.
+    """
+    if not np.isfinite(e) or e <= 0:
+        return 0.0
+    # Under constant hazard m, e = 1/m and survival over width 'step' is exp(-m*step) = exp(-step/e).
+    return float(np.clip(np.exp(-step / e), 0.0, 1.0))
+
+
+def _hazard_from_survival(s: float, step: float) -> float:
+    """
+    Convert closed-interval survival s in one step of width 'step' to the
+    piecewise-constant force of mortality m via s = exp(-m*step).
+    """
+    s = float(np.clip(s, 1e-12, 1.0))
+    return -np.log(s) / step
+
+
+# ------------------------------- main projector -------------------------------
 
 def make_projections(
     n, X, fert_start_idx,
@@ -41,10 +63,18 @@ def make_projections(
     l0,                       # unused (kept for API compatibility)
     year,
     DPTO,
-    death_choice
+    death_choice,
+    *,
+    mort_improv_F: float = 0.015,  # annual proportional improvement in female hazards
+    mort_improv_M: float = 0.015   # annual proportional improvement in male hazards
 ):
     """
     Build two-sex Leslie blocks with correct survival/fertility terms and project X steps.
+
+    Compared to the original version, survivorship is *time-varying*: each year t,
+    the force of mortality for age class x is multiplied by (1 - mort_improv_*)**t.
+    This smooth trend in survival mitigates the artificial peak that arises when
+    survival is frozen at the cutoff year.
 
     Assumptions:
       - Age classes are contiguous, width = step (derived from life table).
@@ -55,6 +85,7 @@ def make_projections(
     # ---- dimensions and containers
     k = n + 1
     columns = [f"t+{i}" for i in range(X + 1)]
+    # We will rebuild L_FF, L_MF, L_MM each step; keep last versions to return/save.
     L_FF = np.zeros((k, k))
     L_MF = np.zeros((k, k))
     L_MM = np.zeros((k, k))
@@ -72,7 +103,7 @@ def make_projections(
         age_idx = np.asarray(lt_2018_F_t.index, dtype=float)
         step = float(age_idx[1] - age_idx[0])
 
-    # ---- survivorship arrays (use lx, not Lx)
+    # ---- survivorship arrays from lx (base year)
     if "lx" not in lt_2018_F_t.columns or "lx" not in lt_2018_M_t.columns:
         raise ValueError("Life tables must include an 'lx' column.")
     lxf = lt_2018_F_t["lx"].to_numpy(dtype=float)
@@ -80,27 +111,28 @@ def make_projections(
     if len(lxf) != k or len(lxm) != k:
         raise ValueError(f"'lx' length must equal n+1 = {k} for both sexes.")
 
-    # ---- sub-diagonals: survive to next class
+    # Closed-interval survivals for subdiagonals (base year)
+    sF_base = np.ones(k, dtype=float)
+    sM_base = np.ones(k, dtype=float)
     for i in range(1, k):
-        L_FF[i, i - 1] = lxf[i] / lxf[i - 1]
-        L_MM[i, i - 1] = lxm[i] / lxm[i - 1]
+        sF_base[i] = lxf[i] / lxf[i - 1]
+        sM_base[i] = lxm[i] / lxm[i - 1]
 
+    # Open-interval survival (base year) derived from ex for coherence
     eF = float(lt_2018_F_t["ex"].iloc[-1])  # remaining life expectancy at open age (female)
     eM = float(lt_2018_M_t["ex"].iloc[-1])  # male
+    sF_open_base = _s_open_from_ex(step, eF)
+    sM_open_base = _s_open_from_ex(step, eM)
 
-    # guard against zeros / negatives and clamp to [0,1]
-    def s_open_from_ex(step, e):
-        if not np.isfinite(e) or e <= 0:
-            return 0.0
-        return float(np.clip(np.exp(-step / e), 0.0, 1.0))
+    # Convert base survivals to base hazards m_x^0 via s = exp(-m*step)
+    mF_base = np.array([_hazard_from_survival(s, step) for s in sF_base], dtype=float)
+    mM_base = np.array([_hazard_from_survival(s, step) for s in sM_base], dtype=float)
+    # Replace last hazards by those implied by ex-based survival (open interval)
+    mF_base[-1] = _hazard_from_survival(sF_open_base, step)
+    mM_base[-1] = _hazard_from_survival(sM_open_base, step)
 
-    L_FF[-1, -1] = s_open_from_ex(step, eF)
-    L_MM[-1, -1] = s_open_from_ex(step, eM)
-    # ---- fertility rows (female exposure only), discounting infant/early-child mortality
-    # survival from birth to start of first class
-    S0 = (lxf[1] / lxf[0]) if k > 1 else 1.0
-
-    # asfr as a Series; robust parse of age labels (handles "50+")
+    # ---- fertility rows (female exposure only)
+    # survival from birth to start of first closed class will be time-varying (computed each step)
     if hasattr(asfr_2018, "columns"):
         asfr_series = asfr_2018["asfr"]
         asfr_index = asfr_2018.index
@@ -119,12 +151,7 @@ def make_projections(
     fert_cols = [fert_start_idx + j for j in range(n_fert)]
     if fert_cols[-1] >= k:
         raise ValueError("Fertility columns exceed matrix dimension; check fert_start_idx and ASFR length.")
-
     births_per_woman = step * asfr_series.to_numpy(dtype=float)
-
-    for j, col in enumerate(fert_cols):
-        L_FF[0, col] = p_f * S0 * births_per_woman[j]
-        L_MF[0, col] = p_m * S0 * births_per_woman[j]
 
     # ---- initial populations
     n0_F = np.asarray(conteos_all_2018_F_p_t, dtype=float).copy()
@@ -135,10 +162,38 @@ def make_projections(
     n_proj_F = [n0_F]
     n_proj_M = [n0_M]
 
-    # ---- projection
-    for _ in range(X):
+    # ---- projection with time-varying survival
+    for t in range(1, X + 1):
+        # annual proportional improvement in hazards
+        mF_t = mF_base * (1.0 - float(mort_improv_F))**t
+        mM_t = mM_base * (1.0 - float(mort_improv_M))**t
+        # convert back to survivals over one step
+        sF_t = np.exp(-mF_t * step)
+        sM_t = np.exp(-mM_t * step)
+
+        # rebuild L matrices for year t
+        L_FF.fill(0.0)
+        L_MF.fill(0.0)
+        L_MM.fill(0.0)
+
+        # sub-diagonals
+        for i in range(1, k):
+            L_FF[i, i - 1] = sF_t[i]
+            L_MM[i, i - 1] = sM_t[i]
+
+        # open interval (diagonal)
+        L_FF[-1, -1] = sF_t[-1]
+        L_MM[-1, -1] = sM_t[-1]
+
+        # fertility rows: discount by survival from birth to start of first closed class
+        S0_t = sF_t[1] if k > 1 else 1.0
+        for j, col in enumerate(fert_cols):
+            L_FF[0, col] = p_f * S0_t * births_per_woman[j]
+            L_MF[0, col] = p_m * S0_t * births_per_woman[j]
+
+        # one-step advance
         n_next_F = L_FF @ n_proj_F[-1]
-        n_next_M = (L_MM @ n_proj_M[-1]) + (L_MF @ n_proj_F[-1])  # first row of L_MM@· is zero
+        n_next_M = (L_MM @ n_proj_M[-1]) + (L_MF @ n_proj_F[-1])
         n_proj_F.append(n_next_F)
         n_proj_M.append(n_next_M)
 
@@ -202,5 +257,5 @@ def make_projections(
     age_structures_df_T["death_choice"] = death_choice
     age_structures_df_T = age_structures_df_T[["EDAD", "DPTO_NOMBRE", "year", "VALOR_corrected"]]
 
-    # return in the same order you used before
+    # return in the same order as before (with L_** equal to the last-step matrices)
     return L_MM, L_MF, L_FF, age_structures_df_M, age_structures_df_F, age_structures_df_T
