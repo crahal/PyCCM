@@ -12,6 +12,64 @@ from projections import make_projections, save_LL, save_projections
 from data_loaders import load_all_data, correct_valor_for_omission, allocate_and_drop_missing_age
 
 
+# --- smooth TFR paths ---------------------------------------------------------
+
+def _exp_tfr(TFR0: float, target: float, years: int, step: int,
+             converge_frac: float = 0.99) -> float:
+    """
+    Monotone exponential approach to 'target':
+        TFR(t) = target + (TFR0 - target) * exp(-kappa * t),  t = step (years).
+    'converge_frac' sets how close (in fraction of the initial gap) we are
+    to the target at 'years' (e.g., 0.99 → 99% of the gap removed).
+    """
+    t = max(step, 0)
+    gap0 = float(TFR0 - target)
+    if gap0 == 0.0:
+        return float(target)
+    # choose kappa so that |gap(years)| = (1 - converge_frac) * |gap0|
+    # i.e. exp(-kappa*years) = 1 - converge_frac
+    eps = 1e-12
+    q = max(1.0 - converge_frac, eps)              # residual fraction at 'years'
+    kappa = -np.log(q) / max(years, 1)             # rate parameter
+    return float(target + gap0 * np.exp(-kappa * t))
+
+
+def _logistic_tfr(TFR0: float, target: float, years: int, step: int,
+                  mid_frac: float = 0.5, steepness: float | None = None) -> float:
+    """
+    Logistic (sigmoid) path between TFR0 (at t=0) and 'target' (asymptote).
+    Center (inflection) is at t0 = mid_frac * years; if 'steepness' is None,
+    it is chosen so that the value at t=years is within ~1% of the target.
+        TFR(t) = target + (TFR0 - target) / (1 + exp[s*(t - t0)])
+                 * (1 + exp[-s*t0])                      (re-scaled so TFR(0)=TFR0)
+    """
+    t = max(step, 0.0)
+    t0 = float(mid_frac) * max(years, 1)
+    # pick s so that distance at the horizon is about 1% of initial gap
+    if steepness is None:
+        r = 100.0  # ~1% residual at the horizon
+        steepness = (np.log(r) - np.log(1 + np.exp(-t0))) / max(years - t0, 1e-9)
+
+    s = float(steepness)
+    gap0 = float(TFR0 - target)
+    # scale factor so that TFR(0) = TFR0 exactly
+    scale = 1.0 + np.exp(-s * t0)
+    return float(target + gap0 * (scale / (1.0 + np.exp(s * (t - t0)))))
+
+
+def _smooth_tfr(TFR0: float, target: float, years: int, step: int,
+                kind: str = "exp", **kwargs) -> float:
+    """
+    Dispatcher: 'exp' (default) or 'logistic'.
+    """
+    if kind == "exp":
+        return _exp_tfr(TFR0, target, years, step, **kwargs)
+    elif kind == "logistic":
+        return _logistic_tfr(TFR0, target, years, step, **kwargs)
+    else:
+        raise ValueError(f"Unknown TFR path kind: {kind!r}")
+
+
 def _bin_width(label: str) -> float:
     """Width Δa of an age bin label like '15-19', '45-49', '80+'."""
     s = str(label)
@@ -72,13 +130,13 @@ def main_wrapper(conteos, projection_range, sample_type, distribution=None, draw
     # choose the last observed year for births by source:
     last_obs_year_by_death = {'EEVV': 2023, 'censo_2018': 2018, 'midpoint': 2018}
 
-    TFR_TARGET = 1.43
-    CONV_YEARS = 25
+    TFR_TARGET = 1.5
+    CONV_YEARS = 50
     for death_choice in ['EEVV', 'censo_2018', 'midpoint']:
         proj_F = pd.DataFrame()
         proj_M = pd.DataFrame()
         proj_T = pd.DataFrame()
-        for year in projection_range:
+        for year in tqdm(projection_range):
             for DPTO in DTPO_list:
                 if DPTO != 'total_nacional':
                     conteos_all = conteos[conteos['DPTO_NOMBRE'] == DPTO]
@@ -248,7 +306,8 @@ def main_wrapper(conteos, projection_range, sample_type, distribution=None, draw
                     w = asfr_weights[key]
                     base = asfr_baseline[key]
                     step = year - base["year"]
-                    TFR_t = _linear_tfr(base["TFR0"], TFR_TARGET, CONV_YEARS, step)
+                    TFR_t = _smooth_tfr(base["TFR0"], TFR_TARGET, CONV_YEARS, step, kind="exp", converge_frac=0.99)
+
 
                     proj_df = asfr_df.copy()
                     proj_df['population'] = np.nan           # keep columns, avoid invented counts
@@ -373,7 +432,7 @@ if __name__ == '__main__':
         return label
 
     # Parallel execution
-    with Pool(processes=cpu_count()-1) as pool:
+    with Pool(processes=cpu_count()-5) as pool:
 #    with Pool(1) as pool:
         for _ in tqdm(pool.imap_unordered(_execute_task, tasks), total=len(tasks), desc='Tasks'):
             pass
