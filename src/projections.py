@@ -26,85 +26,52 @@ def save_LL(L_MM, L_MF, L_FF, death_choice, DPTO, sample_type, distribution, suf
         pd.DataFrame(mat).to_csv(os.path.join(out_path, f'{label}{suffix}{year}.csv'))
 
 
-# --------------------------- helpers for mortality ----------------------------
-
 def _s_open_from_ex(step: float, e: float) -> float:
-    """
-    Closed-form survival over one interval in the open age group, assuming a
-    constant force of mortality m and remaining life expectancy e at the open age.
-    If e<=0 or not finite, returns 0.
-    """
     if not np.isfinite(e) or e <= 0:
         return 0.0
-    # Under constant hazard m, e = 1/m and survival over width 'step' is exp(-m*step) = exp(-step/e).
     return float(np.clip(np.exp(-step / e), 0.0, 1.0))
 
 
 def _hazard_from_survival(s: float, step: float) -> float:
-    """
-    Convert closed-interval survival s in one step of width 'step' to the
-    piecewise-constant force of mortality m via s = exp(-m*step).
-    """
     s = float(np.clip(s, 1e-12, 1.0))
     return -np.log(s) / step
 
 
-# ------------------------------- main projector -------------------------------
-
 def make_projections(
     net_F, net_M,
     n, X, fert_start_idx,
-    conteos_all_2018_M_n_t,   # births, male
-    conteos_all_2018_F_n_t,   # births, female
-    lt_2018_F_t,              # female life table: needs 'lx' (and ideally 'n')
-    lt_2018_M_t,              # male   life table: needs 'lx' (and ideally 'n')
-    conteos_all_2018_F_p_t,   # initial female population by age class (length n+1)
-    conteos_all_2018_M_p_t,   # initial male   population by age class (length n+1)
-    asfr_2018,                # ASFR by female age class (Series or DataFrame with 'asfr')
-    l0,                       # unused (kept for API compatibility)
+    conteos_all_2018_M_n_t,
+    conteos_all_2018_F_n_t,
+    lt_2018_F_t,
+    lt_2018_M_t,
+    conteos_all_2018_F_p_t,
+    conteos_all_2018_M_p_t,
+    asfr_2018,
+    l0,
     year,
     DPTO,
     death_choice,
     *,
-    mort_improv_F: float = 0.015,  # annual proportional improvement in female hazards
-    mort_improv_M: float = 0.015   # annual proportional improvement in male hazards
+    mort_improv_F: float = 0.015,
+    mort_improv_M: float = 0.015
 ):
-    """
-    Build two-sex Leslie blocks with correct survival/fertility terms and project X steps.
-
-    Compared to the original version, survivorship is *time-varying*: each year t,
-    the force of mortality for age class x is multiplied by (1 - mort_improv_*)**t.
-    This smooth trend in survival mitigates the artificial peak that arises when
-    survival is frozen at the cutoff year.
-
-    Assumptions:
-      - Age classes are contiguous, width = step (derived from life table).
-      - State vector has k = n+1 classes, starting at 0–step.
-      - Fertile female columns begin at fert_start_idx and cover len(asfr_2018) classes.
-      - Sex ratio at birth (SRB) computed from births inputs (male/female).
-    """
-    # ---- dimensions and containers
     k = n + 1
     columns = [f"t+{i}" for i in range(X + 1)]
-    # We will rebuild L_FF, L_MF, L_MM each step; keep last versions to return/save.
+
     L_FF = np.zeros((k, k))
     L_MF = np.zeros((k, k))
     L_MM = np.zeros((k, k))
 
-    # ---- SRB from births (male / female)
     srb = float(np.nansum(conteos_all_2018_M_n_t) / np.nansum(conteos_all_2018_F_n_t))
     p_f = 1.0 / (1.0 + srb)
     p_m = srb / (1.0 + srb)
 
-    # ---- class width (step)
     if "n" in lt_2018_F_t.columns:
         step = float(lt_2018_F_t["n"].iloc[0])
     else:
-        # infer from age index spacing
         age_idx = np.asarray(lt_2018_F_t.index, dtype=float)
         step = float(age_idx[1] - age_idx[0])
 
-    # ---- survivorship arrays from lx (base year)
     if "lx" not in lt_2018_F_t.columns or "lx" not in lt_2018_M_t.columns:
         raise ValueError("Life tables must include an 'lx' column.")
     lxf = lt_2018_F_t["lx"].to_numpy(dtype=float)
@@ -112,28 +79,22 @@ def make_projections(
     if len(lxf) != k or len(lxm) != k:
         raise ValueError(f"'lx' length must equal n+1 = {k} for both sexes.")
 
-    # Closed-interval survivals for subdiagonals (base year)
     sF_base = np.ones(k, dtype=float)
     sM_base = np.ones(k, dtype=float)
     for i in range(1, k):
         sF_base[i] = lxf[i] / lxf[i - 1]
         sM_base[i] = lxm[i] / lxm[i - 1]
 
-    # Open-interval survival (base year) derived from ex for coherence
-    eF = float(lt_2018_F_t["ex"].iloc[-1])  # remaining life expectancy at open age (female)
-    eM = float(lt_2018_M_t["ex"].iloc[-1])  # male
+    eF = float(lt_2018_F_t["ex"].iloc[-1])
+    eM = float(lt_2018_M_t["ex"].iloc[-1])
     sF_open_base = _s_open_from_ex(step, eF)
     sM_open_base = _s_open_from_ex(step, eM)
 
-    # Convert base survivals to base hazards m_x^0 via s = exp(-m*step)
     mF_base = np.array([_hazard_from_survival(s, step) for s in sF_base], dtype=float)
     mM_base = np.array([_hazard_from_survival(s, step) for s in sM_base], dtype=float)
-    # Replace last hazards by those implied by ex-based survival (open interval)
     mF_base[-1] = _hazard_from_survival(sF_open_base, step)
     mM_base[-1] = _hazard_from_survival(sM_open_base, step)
 
-    # ---- fertility rows (female exposure only)
-    # survival from birth to start of first closed class will be time-varying (computed each step)
     if hasattr(asfr_2018, "columns"):
         asfr_series = asfr_2018["asfr"]
         asfr_index = asfr_2018.index
@@ -154,7 +115,6 @@ def make_projections(
         raise ValueError("Fertility columns exceed matrix dimension; check fert_start_idx and ASFR length.")
     births_per_woman = step * asfr_series.to_numpy(dtype=float)
 
-    # ---- initial populations
     n0_F = np.asarray(conteos_all_2018_F_p_t, dtype=float).copy()
     n0_M = np.asarray(conteos_all_2018_M_p_t, dtype=float).copy()
     if n0_F.shape[0] != k or n0_M.shape[0] != k:
@@ -163,43 +123,32 @@ def make_projections(
     n_proj_F = [n0_F]
     n_proj_M = [n0_M]
 
-    # ---- projection with time-varying survival
     for t in range(1, X + 1):
-        # annual proportional improvement in hazards
         mF_t = mF_base * (1.0 - float(mort_improv_F))**t
         mM_t = mM_base * (1.0 - float(mort_improv_M))**t
-        # convert back to survivals over one step
         sF_t = np.exp(-mF_t * step)
         sM_t = np.exp(-mM_t * step)
 
-        # rebuild L matrices for year t
-        L_FF.fill(0.0)
-        L_MF.fill(0.0)
-        L_MM.fill(0.0)
+        L_FF.fill(0.0); L_MF.fill(0.0); L_MM.fill(0.0)
 
-        # sub-diagonals
         for i in range(1, k):
             L_FF[i, i - 1] = sF_t[i]
             L_MM[i, i - 1] = sM_t[i]
 
-        # open interval (diagonal)
         L_FF[-1, -1] = sF_t[-1]
         L_MM[-1, -1] = sM_t[-1]
 
-        # fertility rows: discount by survival from birth to start of first closed class
         S0_t = sF_t[1] if k > 1 else 1.0
         for j, col in enumerate(fert_cols):
             L_FF[0, col] = p_f * S0_t * births_per_woman[j]
             L_MF[0, col] = p_m * S0_t * births_per_woman[j]
 
-
-        n_next_F = (L_FF @ (n_proj_F[-1] + (net_F/2))) + (net_F/2)
-        n_next_M = (L_FF @ (n_proj_M[-1] + (net_M/2))) + (n_proj_M[-1]+ (net_M/2)) + (L_MF @ (n_proj_F[-1] + (net_M/2)))
+        # one 5-year step; net_F/net_M are 5-year totals; we already added half before
+        n_next_F = (L_FF @ n_proj_F[-1]) + (net_F / 2)
+        n_next_M = (L_MM @ n_proj_M[-1]) + (net_M / 2) + (L_MF @ n_proj_F[-1])
         n_proj_F.append(n_next_F)
         n_proj_M.append(n_next_M)
 
-    # ---- indexing for output tables
-    # assume life table index are the lower bounds of classes: 0,5,...,80
     try:
         full_ages = lt_2018_F_t.index.astype(int)
     except Exception:
@@ -208,7 +157,6 @@ def make_projections(
         else:
             raise
 
-    # ---- build output DataFrames
     age_structure_matrix_F = np.column_stack(n_proj_F)
     age_structures_df_F = pd.DataFrame(age_structure_matrix_F, index=full_ages, columns=columns)
 
@@ -217,7 +165,6 @@ def make_projections(
 
     age_structures_df_T = age_structures_df_F + age_structures_df_M
 
-    # mapper for pretty labels
     mapper = {
         0: "0-4", 5: "5-9", 10: "10-14", 15: "15-19", 20: "20-24",
         25: "25-29", 30: "30-34", 35: "35-39", 40: "40-44", 45: "45-49",
@@ -225,9 +172,11 @@ def make_projections(
         75: "75-79", 80: "80+"
     }
 
-    # Female
+    # Label results with year + 5 (step width)
+    step_int = int(round(step))
+
     age_structures_df_F = age_structures_df_F.reset_index().rename(columns={"index": "age"})
-    age_structures_df_F["year"] = year + 1
+    age_structures_df_F["year"] = year + step_int
     if "t+1" not in age_structures_df_F.columns:
         raise KeyError("Column 't+1' not found in female projection matrix.")
     age_structures_df_F = age_structures_df_F.rename(columns={"age": "EDAD", "t+1": "VALOR_corrected"})
@@ -236,9 +185,8 @@ def make_projections(
     age_structures_df_F["death_choice"] = death_choice
     age_structures_df_F = age_structures_df_F[["EDAD", "DPTO_NOMBRE", "year", "VALOR_corrected", "death_choice"]]
 
-    # Male
     age_structures_df_M = age_structures_df_M.reset_index().rename(columns={"index": "age"})
-    age_structures_df_M["year"] = year + 1
+    age_structures_df_M["year"] = year + step_int
     if "t+1" not in age_structures_df_M.columns:
         raise KeyError("Column 't+1' not found in male projection matrix.")
     age_structures_df_M = age_structures_df_M.rename(columns={"age": "EDAD", "t+1": "VALOR_corrected"})
@@ -247,9 +195,8 @@ def make_projections(
     age_structures_df_M["death_choice"] = death_choice
     age_structures_df_M = age_structures_df_M[["EDAD", "DPTO_NOMBRE", "year", "VALOR_corrected", "death_choice"]]
 
-    # Total
     age_structures_df_T = age_structures_df_T.reset_index().rename(columns={"index": "age"})
-    age_structures_df_T["year"] = year + 1
+    age_structures_df_T["year"] = year + step_int
     if "t+1" not in age_structures_df_T.columns:
         raise KeyError("Column 't+1' not found in total projection matrix.")
     age_structures_df_T = age_structures_df_T.rename(columns={"age": "EDAD", "t+1": "VALOR_corrected"})
@@ -258,5 +205,4 @@ def make_projections(
     age_structures_df_T["death_choice"] = death_choice
     age_structures_df_T = age_structures_df_T[["EDAD", "DPTO_NOMBRE", "year", "VALOR_corrected"]]
 
-    # return in the same order as before (with L_** equal to the last-step matrices)
     return L_MM, L_MF, L_FF, age_structures_df_M, age_structures_df_F, age_structures_df_T
