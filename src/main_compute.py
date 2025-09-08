@@ -13,6 +13,11 @@ from projections import make_projections, save_LL, save_projections
 from data_loaders import load_all_data, correct_valor_for_omission, allocate_and_drop_missing_age
 
 
+def get_target_tfrs(file_path):
+    df = pd.read_csv(file_path)
+    return dict(zip(df["DPTO_NOMBRE"], df["Target_TFR"]))
+
+
 def _normalize_weights_to(idx, w):
     """Reindex weights to `idx` and renormalize so sum(w*Δa)=1 over that index."""
     idx = pd.Index(idx).astype(str).str.strip()
@@ -74,13 +79,16 @@ def _bin_width(label: str) -> float:
         return 5.0
     return 1.0
 
+
 def _widths_from_index(idx) -> np.ndarray:
     return np.array([_bin_width(x) for x in idx], dtype=float)
+
 
 def _tfr_from_asfr_df(asfr_df: pd.DataFrame) -> float:
     s = asfr_df['asfr'].astype(float)
     widths = _widths_from_index(s.index)
     return float(np.sum(s.values * widths))
+
 
 def _linear_tfr(TFR0: float, target: float, years: int, step: int) -> float:
     u = min(max(step / years, 0.0), 1.0)
@@ -104,7 +112,106 @@ def main_wrapper(conteos, emi, imi, projection_range, sample_type, distribution=
 
     last_obs_year_by_death = {'EEVV': 2023, 'censo_2018': 2018, 'midpoint': 2018}
 
-    TFR_TARGET = 1.5
+    # --- NEW: target TFR configuration/loading
+    DEFAULT_TFR_TARGET = 1.5  # used if file absent OR value missing/non-finite
+    target_tfrs = None
+    target_csv_path = '../data/target_tfrs.csv'
+    if os.path.exists(target_csv_path):
+        target_tfrs = get_target_tfrs(target_csv_path)
+        # Coverage diagnostics (printed once)
+        dptos_no_nat = [d for d in DTPO_list if d != 'total_nacional']
+
+        def _finite(x):
+            try:
+                return np.isfinite(float(x))
+            except Exception:
+                return False
+
+        missing = [d for d in dptos_no_nat if not (d in target_tfrs and _finite(target_tfrs[d]))]
+        if len(missing) == 0:
+            print("target_csv present: per-DPTO targets available for all DPTOs.")
+        else:
+            print(f"target_csv present: missing/invalid targets for {len(missing)} DPTO(s); "
+                  f"defaulting to global target where needed.")
+
+        if ('total_nacional' in target_tfrs) and _finite(target_tfrs['total_nacional']):
+            print("target_csv includes a finite total_nacional target.")
+        else:
+            print("target_csv present but no finite total_nacional target; aggregating national target from DPTO targets.")
+    else:
+        print("no target_csv file, defaulting to global target")
+
+    # --- NEW: helpers local to this wrapper so they can see proj_F/conteos
+    def _is_finite_number(x) -> bool:
+        try:
+            return np.isfinite(float(x))
+        except Exception:
+            return False
+
+    def _dept_target_or_default(dpto_name: str) -> float:
+        """DPTO-specific target if present and finite; else DEFAULT_TFR_TARGET."""
+        if (target_tfrs is not None) and (dpto_name in target_tfrs) and _is_finite_number(target_tfrs[dpto_name]):
+            return float(target_tfrs[dpto_name])
+        return float(DEFAULT_TFR_TARGET)
+
+    def _national_weighted_target(year: int, death_choice: str, asfr_age_index) -> float:
+        """
+        Exposure-weighted aggregation of DPTO targets for 'total_nacional' when its own target
+        is NaN/missing. Weights are female exposures in ASFR ages for the relevant year/source.
+        """
+        dptos_no_nat = [d for d in DTPO_list if d != 'total_nacional']
+        asfr_ages = pd.Index(asfr_age_index).astype(str)
+
+        if (year == 2018) or (death_choice != 'EEVV'):
+            base = (conteos[(conteos['VARIABLE'] == 'poblacion_total') &
+                            (conteos['FUENTE'] == 'censo_2018') &
+                            (conteos['SEXO'] == 2) &
+                            (conteos['ANO'] == 2018) &
+                            (conteos['DPTO_NOMBRE'].isin(dptos_no_nat))].copy())
+            exp_by_dpto = (base[base['EDAD'].isin(asfr_ages)]
+                           .groupby('DPTO_NOMBRE')['VALOR_corrected'].sum())
+        else:
+            base = (proj_F[(proj_F['year'] == year) &
+                           (proj_F['death_choice'] == death_choice) &
+                           (proj_F['DPTO_NOMBRE'].isin(dptos_no_nat))].copy())
+            exp_by_dpto = (base[base['EDAD'].isin(asfr_ages)]
+                           .groupby('DPTO_NOMBRE')['VALOR_corrected'].sum())
+
+        exp_by_dpto = exp_by_dpto.fillna(0.0)
+        total_exp = float(exp_by_dpto.sum())
+        if not np.isfinite(total_exp) or total_exp <= 0.0:
+            # degenerate fallback: simple average of available targets (or DEFAULT if none)
+            t_list = [_dept_target_or_default(d) for d in dptos_no_nat]
+            return float(np.mean(t_list)) if len(t_list) else float(DEFAULT_TFR_TARGET)
+
+        num = 0.0
+        for d in dptos_no_nat:
+            Ei = float(exp_by_dpto.get(d, 0.0))
+            wi = Ei / total_exp
+            ti = _dept_target_or_default(d)
+            num += wi * ti
+        return float(num)
+
+    def _target_for_this_unit(dpto_name: str, year: int, death_choice: str, asfr_age_index) -> float:
+        """
+        Convergence target selection:
+          - If no CSV: DEFAULT_TFR_TARGET.
+          - If DPTO has finite target: use it.
+          - If DPTO == 'total_nacional' and its value missing/NaN: use exposure-weighted aggregate.
+          - Else: DEFAULT_TFR_TARGET.
+        """
+        if target_tfrs is None:
+            return float(DEFAULT_TFR_TARGET)
+
+        if dpto_name != 'total_nacional':
+            return _dept_target_or_default(dpto_name)
+
+        # dpto_name == 'total_nacional'
+        if ('total_nacional' in target_tfrs) and _is_finite_number(target_tfrs['total_nacional']):
+            return float(target_tfrs['total_nacional'])
+
+        return _national_weighted_target(year, death_choice, asfr_age_index)
+
     CONV_YEARS = 50
     PERIOD_YEARS = 5  # <<< 5-year block
 
@@ -345,7 +452,11 @@ def main_wrapper(conteos, emi, imi, projection_range, sample_type, distribution=
                     w = asfr_weights[key]
                     base = asfr_baseline[key]
                     step = year - base["year"]
-                    TFR_t = _smooth_tfr(base["TFR0"], TFR_TARGET, CONV_YEARS, step, kind="exp", converge_frac=0.99)
+
+                    # --- NEW: use DPTO-specific target (or national weighted fallback)
+                    TFR_TARGET_LOCAL = _target_for_this_unit(DPTO, year, death_choice, asfr_df.index)
+
+                    TFR_t = _smooth_tfr(base["TFR0"], TFR_TARGET_LOCAL, CONV_YEARS, step, kind="exp", converge_frac=0.99)
 
                     proj_df = asfr_df.copy()
                     proj_df['population'] = np.nan
