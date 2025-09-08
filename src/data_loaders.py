@@ -118,16 +118,15 @@ def read_rds_file(file_path: str) -> pd.DataFrame:
         raise RuntimeError(f"Failed to read {file_path}: {e}")
 
 
-def load_all_data() -> dict:
+def load_all_data(data_dir) -> dict:
     """
     Loads all required RDS files and returns them as a dictionary of DataFrames.
     """
-    base_dir = _get_base_dir()
     data_files = {
-        'conteos': os.path.join(base_dir, '..', 'data', 'conteos.rds'),
-        'migracion_destino_edad': os.path.join(base_dir, '..', 'data', 'migracion_destino_edad.rds'),
-        'migracion_origen_destino': os.path.join(base_dir, '..', 'data', 'migracion_origen_destino.rds'),
-        'tasas_especificas': os.path.join(base_dir, '..', 'data', 'tasas_especificas.rds')
+        'conteos': os.path.join(data_dir, 'conteos.rds'),
+        'migracion_destino_edad': os.path.join(data_dir, 'migracion_destino_edad.rds'),
+        'migracion_origen_destino': os.path.join(data_dir, 'migracion_origen_destino.rds'),
+        'tasas_especificas': os.path.join(data_dir, 'tasas_especificas.rds')
     }
 
     for name, path in data_files.items():

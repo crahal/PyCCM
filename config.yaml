@@ -1,0 +1,89 @@
+# config.yaml (fixed)
+
+paths:
+  data_dir: "./data"
+  results_dir: "./results"
+  target_tfr_csv: "./data/target_tfrs.csv"
+
+diagnostics:
+  print_target_csv: true
+
+projections:
+  start_year: 2018
+  end_year: 2070
+  step_years: 5
+  death_choices: ["EEVV", "censo_2018", "midpoint"]
+  last_observed_year_by_death:
+    EEVV: 2023
+    censo_2018: 2018
+    midpoint: 2018
+  period_years: 5
+  flows_latest_year: 2021
+
+fertility:
+  default_tfr_target: 1.5
+  convergence_years: 50
+  smoother:
+    kind: "exp" # "exp" or "logistic"
+    converge_frac: 0.99 # used when kind=="exp"
+    logistic:
+      mid_frac: 0.5
+      steepness: null
+
+age_bins:
+  expected_bins:
+    - "0-4"
+    - "5-9"
+    - "10-14"
+    - "15-19"
+    - "20-24"
+    - "25-29"
+    - "30-34"
+    - "35-39"
+    - "40-44"
+    - "45-49"
+    - "50-54"
+    - "55-59"
+    - "60-64"
+    - "65-69"
+    - "70-74"
+    - "75-79"
+    - "80+"
+  order:
+    - "0-4"
+    - "5-9"
+    - "10-14"
+    - "15-19"
+    - "20-24"
+    - "25-29"
+    - "30-34"
+    - "35-39"
+    - "40-44"
+    - "45-49"
+    - "50-54"
+    - "55-59"
+    - "60-64"
+    - "65-69"
+    - "70-74"
+    - "75-79"
+    - "80+"
+
+runs:
+  mode: "no_draws" # "no_draws" | "draws"
+  no_draws_tasks:
+    - { sample_type: "mid", distribution: null, label: "mid_omissions" }
+    - { sample_type: "low", distribution: null, label: "low_omissions" }
+    - { sample_type: "high", distribution: null, label: "high_omissions" }
+  draws:
+    num_draws: 1000
+    dist_types: ["uniform", "pert", "beta", "normal"]
+    label_pattern: "{dist}_draw_{i}"
+
+parallel:
+  processes: 1
+
+filenames:
+  asfr: "asfr.csv"
+  lt_M: "lt_M_t.csv"
+  lt_F: "lt_F_t.csv"
+  lt_T: "lt_T_t.csv"
