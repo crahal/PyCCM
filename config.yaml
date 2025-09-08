@@ -30,6 +30,10 @@ fertility:
       mid_frac: 0.5
       steepness: null
 
+mortality:
+  use_ma: true # apply centered moving-average on log(mx) before qx construction
+  ma_window: 5 # centered window size (must be odd for symmetry; code permits any int >=1)
+
 age_bins:
   expected_bins:
     - "0-4"

@@ -1,11 +1,10 @@
 # src/run_projections.py
-# Script rewritten to load hard-coded parameters from a YAML config at project root (../config.yaml).
 
 import os
 import sys
 import zlib
 import yaml
-import pyreadr  # noqa: F401 (import kept if used elsewhere)
+import pyreadr  # noqa: F401
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
@@ -13,10 +12,9 @@ from multiprocessing import Pool, cpu_count
 
 from mortality import make_lifetable
 from fertility import compute_asfr
-from migration import create_migration_frame  # noqa: F401 (import kept if used elsewhere)
+from migration import create_migration_frame  # noqa: F401
 from projections import make_projections, save_LL, save_projections
 from data_loaders import load_all_data, correct_valor_for_omission, allocate_and_drop_missing_age
-
 
 # ------------------------------- Config loading -------------------------------
 
@@ -43,8 +41,8 @@ _DEFAULT_CFG = {
         "default_tfr_target": 1.5,
         "convergence_years": 50,
         "smoother": {
-            "kind": "exp",          # "exp" | "logistic"
-            "converge_frac": 0.99,  # for exp
+            "kind": "exp",
+            "converge_frac": 0.99,
             "logistic": {"mid_frac": 0.5, "steepness": None},
         },
     },
@@ -54,8 +52,13 @@ _DEFAULT_CFG = {
         "order": ["0-4","5-9","10-14","15-19","20-24","25-29","30-34","35-39",
                   "40-44","45-49","50-54","55-59","60-64","65-69","70-74","75-79","80+"],
     },
+    # NEW: mortality block to control moving-average graduation of mx in life tables
+    "mortality": {
+        "use_ma": True,
+        "ma_window": 5
+    },
     "runs": {
-        "mode": "no_draws",  # "no_draws" | "draws"
+        "mode": "no_draws",
         "no_draws_tasks": [
             {"sample_type": "mid",  "distribution": None, "label": "mid_omissions"},
             {"sample_type": "low",  "distribution": None, "label": "low_omissions"},
@@ -77,7 +80,6 @@ def _load_config(path: str) -> dict:
         return _DEFAULT_CFG
     with open(path, "r", encoding="utf-8") as fh:
         cfg_user = yaml.safe_load(fh) or {}
-    # shallow merge: user overrides defaults
     cfg = _DEFAULT_CFG.copy()
     for k, v in cfg_user.items():
         if isinstance(v, dict) and isinstance(cfg.get(k), dict):
@@ -90,7 +92,6 @@ def _load_config(path: str) -> dict:
 
 CFG = _load_config(CONFIG_PATH)
 
-# Normalise/resolve paths w.r.t. ROOT_DIR
 def _resolve(p): return os.path.abspath(os.path.join(ROOT_DIR, p))
 PATHS = {
     "data_dir": _resolve(CFG["paths"]["data_dir"]),
@@ -126,7 +127,6 @@ SMOOTH_KW = (
 AGEB = CFG["age_bins"]
 def _coerce_list(x):
     if isinstance(x, list):
-        # flatten nested one-level lists if any
         flat = []
         for it in x:
             if isinstance(it, list):
@@ -140,7 +140,6 @@ def _coerce_list(x):
         if ";" in x or "," in x:
             return [s.strip() for s in x.replace(",", ";").split(";") if s.strip()]
         return [x.strip()]
-    # fallback to defaults if malformed
     return _DEFAULT_CFG["age_bins"]["expected_bins"]
 
 EXPECTED_BINS = _coerce_list(AGEB.get("expected_bins", _DEFAULT_CFG["age_bins"]["expected_bins"]))
@@ -155,6 +154,10 @@ N_PROCS = int(CFG.get("parallel", {}).get("processes", 1)) or 1
 
 FILENAMES = CFG["filenames"]
 
+# NEW: life-table moving-average parameters from YAML
+MORT = CFG.get("mortality", {})
+LT_USE_MA = bool(MORT.get("use_ma", True))
+LT_MA_WINDOW = int(MORT.get("ma_window", 5))
 
 # ------------------------------ Helper functions ------------------------------
 
@@ -163,7 +166,6 @@ def get_target_tfrs(file_path: str) -> dict:
     return dict(zip(df["DPTO_NOMBRE"], df["Target_TFR"]))
 
 def _with_suffix(fname: str, suffix: str) -> str:
-    """Insert suffix before extension, if suffix is non-empty (e.g., 'asfr.csv' + '_draw1' -> 'asfr_draw1.csv')."""
     if not suffix:
         return fname
     base, ext = os.path.splitext(fname)
@@ -187,7 +189,6 @@ def _tfr_from_asfr_df(asfr_df: pd.DataFrame) -> float:
     return float(np.sum(s.values * widths))
 
 def _normalize_weights_to(idx, w):
-    """Reindex weights to `idx` and renormalize so sum(w*Δa)=1 over that index."""
     idx = pd.Index(idx).astype(str).str.strip()
     w = pd.Series(w, copy=False)
     w.index = w.index.astype(str).str.strip()
@@ -195,7 +196,6 @@ def _normalize_weights_to(idx, w):
     widths = _widths_from_index(idx)
     s = float(np.sum(w.values * widths))
     if not np.isfinite(s) or s <= 0:
-        # uniform fallback
         w = pd.Series(1.0, index=idx) / len(idx)
         s = float(np.sum(w.values * widths))
     return w / s
@@ -231,9 +231,7 @@ def _smooth_tfr(TFR0: float, target: float, years: int, step: int, kind: str = "
         raise ValueError(f"Unknown TFR path kind: {kind!r}")
 
 def fill_missing_age_bins(s: pd.Series) -> pd.Series:
-    # Uses EXPECTED_BINS from config
     return s.reindex(EXPECTED_BINS, fill_value=0)
-
 
 # ------------------------------- Main procedure -------------------------------
 
@@ -241,13 +239,12 @@ def main_wrapper(conteos, emi, imi, projection_range, sample_type, distribution=
     DTPO_list = list(conteos["DPTO_NOMBRE"].unique()) + ["total_nacional"]
     suffix = f"_{draw}" if distribution is not None else ""
 
-    asfr_weights = {}      # key: (DPTO, death_choice) -> w(a) with sum(w*Δa)=1
-    asfr_baseline = {}     # key -> dict(year=y0, TFR0=TFR0)
+    asfr_weights = {}
+    asfr_baseline = {}
 
-    # last observed year per death source from config
     last_obs_year_by_death = dict(LAST_OBS_YEAR)
 
-    # --- Target TFR loading/diagnostics
+    # Target TFR loading/diagnostics
     target_tfrs = None
     target_csv_path = PATHS["target_tfr_csv"]
     if os.path.exists(target_csv_path):
@@ -281,16 +278,11 @@ def main_wrapper(conteos, emi, imi, projection_range, sample_type, distribution=
             return False
 
     def _dept_target_or_default(dpto_name: str) -> float:
-        """DPTO-specific target if present and finite; else DEFAULT_TFR_TARGET from config."""
         if (target_tfrs is not None) and (dpto_name in target_tfrs) and _is_finite_number(target_tfrs[dpto_name]):
             return float(target_tfrs[dpto_name])
         return float(DEFAULT_TFR_TARGET)
 
     def _national_weighted_target(year: int, death_choice: str, asfr_age_index) -> float:
-        """
-        Exposure-weighted aggregation of DPTO targets for 'total_nacional' when its own target
-        is NaN/missing. Weights are female exposures in ASFR ages for the relevant year/source.
-        """
         dptos_no_nat = [d for d in DTPO_list if d != "total_nacional"]
         asfr_ages = pd.Index(asfr_age_index).astype(str)
 
@@ -392,7 +384,6 @@ def main_wrapper(conteos, emi, imi, projection_range, sample_type, distribution=
                         conteos_all_M_p = conteos_all_M[(conteos_all_M["VARIABLE"] == "poblacion_total") & (conteos_all_M["FUENTE"] == "censo_2018")]
                         conteos_all_F_p = conteos_all_F[(conteos_all_F["VARIABLE"] == "poblacion_total") & (conteos_all_F["FUENTE"] == "censo_2018")]
                     elif (year > 2018 and year <= LAST_OBS_YEAR["EEVV"]):
-                        # USE PROJECTIONS FOR POPULATION
                         conteos_all_F_p = proj_F[(proj_F["year"] == year) & (proj_F["DPTO_NOMBRE"] == DPTO) & (proj_F["death_choice"] == death_choice)]
                         conteos_all_M_p = proj_M[(proj_M["year"] == year) & (proj_M["DPTO_NOMBRE"] == DPTO) & (proj_M["death_choice"] == death_choice)]
 
@@ -473,16 +464,26 @@ def main_wrapper(conteos, emi, imi, projection_range, sample_type, distribution=
 
                 # --- Life tables (5-year block)
                 if ((death_choice == "EEVV") and (year < LAST_OBS_YEAR["EEVV"] + 1)) or ((death_choice != "EEVV") and (year == 2018)):
-                    lt_M_t = make_lifetable(fill_missing_age_bins(conteos_all_M_d_t).index,
-                                            fill_missing_age_bins(conteos_all_M_p_t),
-                                            fill_missing_age_bins(conteos_all_M_d_t))
-                    lt_F_t = make_lifetable(fill_missing_age_bins(conteos_all_F_d_t).index,
-                                            fill_missing_age_bins(conteos_all_F_p_t),
-                                            fill_missing_age_bins(conteos_all_F_d_t))
-                    lt_T_t = make_lifetable(fill_missing_age_bins(conteos_all_M_d_t).index,
-                                            fill_missing_age_bins(conteos_all_M_p_t) + fill_missing_age_bins(conteos_all_F_p_t),
-                                            fill_missing_age_bins(conteos_all_M_d_t) + fill_missing_age_bins(conteos_all_F_d_t))
-                    # write LTs under configured results_dir
+                    lt_M_t = make_lifetable(
+                        fill_missing_age_bins(conteos_all_M_d_t).index,
+                        fill_missing_age_bins(conteos_all_M_p_t),
+                        fill_missing_age_bins(conteos_all_M_d_t),
+                        # pass MA control from YAML
+                        use_ma=LT_USE_MA, ma_window=LT_MA_WINDOW
+                    )
+                    lt_F_t = make_lifetable(
+                        fill_missing_age_bins(conteos_all_F_d_t).index,
+                        fill_missing_age_bins(conteos_all_F_p_t),
+                        fill_missing_age_bins(conteos_all_F_d_t),
+                        use_ma=LT_USE_MA, ma_window=LT_MA_WINDOW
+                    )
+                    lt_T_t = make_lifetable(
+                        fill_missing_age_bins(conteos_all_M_d_t).index,
+                        fill_missing_age_bins(conteos_all_M_p_t) + fill_missing_age_bins(conteos_all_F_p_t),
+                        fill_missing_age_bins(conteos_all_M_d_t) + fill_missing_age_bins(conteos_all_F_d_t),
+                        use_ma=LT_USE_MA, ma_window=LT_MA_WINDOW
+                    )
+                    # write LTs
                     if distribution is None:
                         lt_path = os.path.join(PATHS["results_dir"], "lifetables", DPTO, sample_type, death_choice, str(year))
                     else:
@@ -492,7 +493,7 @@ def main_wrapper(conteos, emi, imi, projection_range, sample_type, distribution=
                     lt_F_t.to_csv(os.path.join(lt_path, _with_suffix(FILENAMES["lt_F"], suffix)))
                     lt_T_t.to_csv(os.path.join(lt_path, _with_suffix(FILENAMES["lt_T"], suffix)))
 
-                # --- ASFR (robust; fallbacks if TFR0 invalid)
+                # --- ASFR (unchanged) ...
                 cutoff = last_obs_year_by_death[death_choice]
                 key = (DPTO, death_choice)
 
@@ -506,7 +507,6 @@ def main_wrapper(conteos, emi, imi, projection_range, sample_type, distribution=
                 if year <= cutoff:
                     TFR0 = _tfr_from_asfr_df(asfr_df)
                     if not np.isfinite(TFR0) or TFR0 <= 0.0:
-                        # fallback: use last known weights for this DPTO or national, scaled to baseline TFR
                         if key in asfr_weights and key in asfr_baseline:
                             w_norm = _normalize_weights_to(asfr_df.index, asfr_weights[key])
                             TFR0 = float(asfr_baseline[key]["TFR0"])
@@ -521,7 +521,6 @@ def main_wrapper(conteos, emi, imi, projection_range, sample_type, distribution=
                                 raise ValueError(f"No usable ASFR for {key} in year {year} and no prior weights available.")
                         TFR0 = _tfr_from_asfr_df(asfr_df)
 
-                    # store weights/baseline from observed (or rescued) year
                     w = asfr_df["asfr"] / TFR0
                     asfr_weights[key] = w
                     asfr_baseline[key] = {"year": year, "TFR0": TFR0}
@@ -533,9 +532,7 @@ def main_wrapper(conteos, emi, imi, projection_range, sample_type, distribution=
                     base = asfr_baseline[key]
                     step = year - base["year"]
 
-                    # DPTO-specific convergence target (or national weighted fallback)
                     TFR_TARGET_LOCAL = _target_for_this_unit(DPTO, year, death_choice, asfr_df.index)
-
                     TFR_t = _smooth_tfr(base["TFR0"], TFR_TARGET_LOCAL, CONV_YEARS, step, kind=SMOOTH_KIND, **SMOOTH_KW)
 
                     proj_df = asfr_df.copy()
@@ -551,7 +548,6 @@ def main_wrapper(conteos, emi, imi, projection_range, sample_type, distribution=
                     asfr_df = proj_df
                     asfr = proj_df
 
-                # write ASFR under configured results_dir
                 if distribution is None:
                     asfr_path = os.path.join(PATHS["results_dir"], "asfr", DPTO, sample_type, str(year))
                 else:
@@ -559,7 +555,6 @@ def main_wrapper(conteos, emi, imi, projection_range, sample_type, distribution=
                 os.makedirs(asfr_path, exist_ok=True)
                 asfr_df.to_csv(os.path.join(asfr_path, _with_suffix(FILENAMES["asfr"], suffix)))
 
-                # --- Projections (Leslie step = 5 years; pass full 5-yr net migration)
                 if year == 2018:
                     L_MM, L_MF, L_FF, age_structures_df_M, age_structures_df_F, age_structures_df_T = make_projections(
                         net_F, net_M, len(lt_F_t) - 1, 1, 2,
@@ -584,21 +579,18 @@ def main_wrapper(conteos, emi, imi, projection_range, sample_type, distribution=
 
         save_projections(proj_F, proj_M, proj_T, sample_type, distribution, suffix, death_choice, year)
 
-
 # ----------------------------------- main -------------------------------------
 
 if __name__ == "__main__":
-    # Construct projection range from config
     projection_range = range(START_YEAR, END_YEAR + 1, STEP_YEARS)
 
+    # If your loader accepts a base path, pass it (as you wrote in your message)
     data = load_all_data(PATHS["data_dir"])
     conteos = data["conteos"]
 
-    # Migration tables
     emi = conteos[conteos["VARIABLE"] == "crt_visa_F_emigracion"]
     imi = conteos[conteos["VARIABLE"] == "crt_visa_F_inmigracion"]
 
-    # Build task list from config or CLI override ("draws")
     tasks = []
     if len(sys.argv) > 1 and sys.argv[1] == "draws":
         print("We'll be running this with draws")
@@ -642,7 +634,6 @@ if __name__ == "__main__":
             main_wrapper(df, emi, imi, projection_range, "draw", dist, label)
         return label
 
-    # Parallel execution
     n_workers = N_PROCS if N_PROCS > 0 else 1
     with Pool(n_workers) as pool:
         for _ in tqdm(pool.imap_unordered(_execute_task, tasks), total=len(tasks), desc="Tasks"):
