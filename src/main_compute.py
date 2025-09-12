@@ -1,20 +1,26 @@
-# src/run_projections.py
+# src/main_compute.py
+# End-to-end driver with UNABRIDGING flag (default True).
+# If unabridging.enabled == True  -> single-year ages (0..89, 90+) and ANNUAL projections.
+# If unabridging.enabled == False -> five-year ages and QUINQUENNIAL projections.
 
+from __future__ import annotations
 import os
 import sys
 import zlib
 import yaml
-import pyreadr  # noqa: F401
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
-from multiprocessing import Pool, cpu_count
+from multiprocessing import Pool
 
 from mortality import make_lifetable
 from fertility import compute_asfr
-from migration import create_migration_frame  # noqa: F401
 from projections import make_projections, save_LL, save_projections
 from data_loaders import load_all_data, correct_valor_for_omission, allocate_and_drop_missing_age
+from abridger import (
+    unabridge_all, save_unabridged, SERIES_KEYS_DEFAULT,
+    harmonize_migration_to_90plus, harmonize_conteos_to_90plus
+)
 
 # ------------------------------- Config loading -------------------------------
 
@@ -23,18 +29,18 @@ CONFIG_PATH = os.path.join(ROOT_DIR, "config.yaml")
 
 _DEFAULT_CFG = {
     "paths": {
-        "data_dir": "../data",
-        "results_dir": "../results",
-        "target_tfr_csv": "../data/target_tfrs.csv",
+        "data_dir": "./data",
+        "results_dir": "./results",
+        "target_tfr_csv": "./data/target_tfrs.csv",
     },
     "diagnostics": {"print_target_csv": True},
     "projections": {
         "start_year": 2018,
         "end_year": 2070,
-        "step_years": 5,
+        "step_years": 5,  # used only when unabridging.enabled == false
         "death_choices": ["EEVV", "censo_2018", "midpoint"],
         "last_observed_year_by_death": {"EEVV": 2023, "censo_2018": 2018, "midpoint": 2018},
-        "period_years": 5,
+        "period_years": 5,  # will be overridden dynamically by UNABR switch
         "flows_latest_year": 2021,
     },
     "fertility": {
@@ -47,16 +53,13 @@ _DEFAULT_CFG = {
         },
     },
     "age_bins": {
+        # used only when unabridging.enabled == false
         "expected_bins": ["0-4","5-9","10-14","15-19","20-24","25-29","30-34","35-39",
                           "40-44","45-49","50-54","55-59","60-64","65-69","70-74","75-79","80+"],
         "order": ["0-4","5-9","10-14","15-19","20-24","25-29","30-34","35-39",
                   "40-44","45-49","50-54","55-59","60-64","65-69","70-74","75-79","80+"],
     },
-    # NEW: mortality block to control moving-average graduation of mx in life tables
-    "mortality": {
-        "use_ma": True,
-        "ma_window": 5
-    },
+    "mortality": {"use_ma": True, "ma_window": 5},
     "runs": {
         "mode": "no_draws",
         "no_draws_tasks": [
@@ -70,7 +73,9 @@ _DEFAULT_CFG = {
             "label_pattern": "{dist}_draw_{i}",
         },
     },
-    "parallel": {"processes": 1},
+    # Switch between one-year and five-year pipelines
+    "unabridging": {"enabled": True},
+    # filenames fallback if not present in YAML
     "filenames": {"asfr": "asfr.csv", "lt_M": "lt_M_t.csv", "lt_F": "lt_F_t.csv", "lt_T": "lt_T_t.csv"},
 }
 
@@ -80,12 +85,11 @@ def _load_config(path: str) -> dict:
         return _DEFAULT_CFG
     with open(path, "r", encoding="utf-8") as fh:
         cfg_user = yaml.safe_load(fh) or {}
+    # deep merge, 1 level
     cfg = _DEFAULT_CFG.copy()
     for k, v in cfg_user.items():
         if isinstance(v, dict) and isinstance(cfg.get(k), dict):
-            d = cfg[k].copy()
-            d.update(v)
-            cfg[k] = d
+            d = cfg[k].copy(); d.update(v); cfg[k] = d
         else:
             cfg[k] = v
     return cfg
@@ -104,10 +108,8 @@ PRINT_TARGET_CSV = bool(CFG.get("diagnostics", {}).get("print_target_csv", True)
 PROJ = CFG["projections"]
 START_YEAR = int(PROJ["start_year"])
 END_YEAR = int(PROJ["end_year"])
-STEP_YEARS = int(PROJ["step_years"])
 DEATH_CHOICES = list(PROJ["death_choices"])
 LAST_OBS_YEAR = dict(PROJ["last_observed_year_by_death"])
-PERIOD_YEARS = int(PROJ["period_years"])
 FLOWS_LATEST_YEAR = int(PROJ["flows_latest_year"])
 
 FERT = CFG["fertility"]
@@ -118,13 +120,32 @@ SMOOTH_KIND = SMOOTHER.get("kind", "exp")
 SMOOTH_KW = (
     {"converge_frac": float(SMOOTHER.get("converge_frac", 0.99))}
     if SMOOTH_KIND == "exp"
-    else {
-        "mid_frac": float(SMOOTHER.get("logistic", {}).get("mid_frac", 0.5)),
-        "steepness": (SMOOTHER.get("logistic", {}).get("steepness", None)),
-    }
+    else {"mid_frac": float(SMOOTHER["logistic"].get("mid_frac", 0.5)),
+          "steepness": (SMOOTHER["logistic"].get("steepness", None))}
 )
 
-AGEB = CFG["age_bins"]
+FILENAMES = CFG.get("filenames", {})
+LT_NAME_M = FILENAMES.get("lt_M", "lt_M_t.csv")
+LT_NAME_F = FILENAMES.get("lt_F", "lt_F_t.csv")
+LT_NAME_T = FILENAMES.get("lt_T", "lt_T_t.csv")
+
+# ------------------------------ Age scaffolding ------------------------------
+
+def _single_year_bins() -> list[str]:
+    return [str(a) for a in range(0, 90)] + ["90+"]
+
+def _bin_width(label: str) -> float:
+    s = str(label)
+    if "-" in s:
+        lo, hi = s.split("-")
+        return float(hi) - float(lo) + 1.0
+    if s.endswith("+"):
+        return 5.0
+    return 1.0
+
+def _widths_from_index(idx) -> np.ndarray:
+    return np.array([_bin_width(x) for x in idx], dtype=float)
+
 def _coerce_list(x):
     if isinstance(x, list):
         flat = []
@@ -142,22 +163,21 @@ def _coerce_list(x):
         return [x.strip()]
     return _DEFAULT_CFG["age_bins"]["expected_bins"]
 
-EXPECTED_BINS = _coerce_list(AGEB.get("expected_bins", _DEFAULT_CFG["age_bins"]["expected_bins"]))
-EDAD_ORDER = _coerce_list(AGEB.get("order", _DEFAULT_CFG["age_bins"]["order"]))
+UNABR = bool(CFG.get("unabridging", {}).get("enabled", True))
 
-RUNS = CFG["runs"]
-MODE = RUNS.get("mode", "no_draws")
-NO_DRAWS_TASKS = RUNS.get("no_draws_tasks", _DEFAULT_CFG["runs"]["no_draws_tasks"])
-DRAWS = RUNS.get("draws", _DEFAULT_CFG["runs"]["draws"])
-
-N_PROCS = int(CFG.get("parallel", {}).get("processes", 1)) or 1
-
-FILENAMES = CFG["filenames"]
-
-# NEW: life-table moving-average parameters from YAML
-MORT = CFG.get("mortality", {})
-LT_USE_MA = bool(MORT.get("use_ma", True))
-LT_MA_WINDOW = int(MORT.get("ma_window", 5))
+if UNABR:
+    EXPECTED_BINS = _single_year_bins()
+    EDAD_ORDER    = EXPECTED_BINS[:]  # single-year order
+    STEP_YEARS    = 1
+    PERIOD_YEARS  = 1
+    print("[pipeline] UNABRIDGED mode: single-year ages & annual projections.")
+else:
+    AGEB = CFG["age_bins"]
+    EXPECTED_BINS = _coerce_list(AGEB.get("expected_bins", _DEFAULT_CFG["age_bins"]["expected_bins"]))
+    EDAD_ORDER    = _coerce_list(AGEB.get("order", _DEFAULT_CFG["age_bins"]["order"]))
+    STEP_YEARS    = int(PROJ.get("step_years", 5)) or 5
+    PERIOD_YEARS  = STEP_YEARS
+    print(f"[pipeline] ABRIDGED mode: 5-year ages & projections every {STEP_YEARS} years.")
 
 # ------------------------------ Helper functions ------------------------------
 
@@ -170,18 +190,6 @@ def _with_suffix(fname: str, suffix: str) -> str:
         return fname
     base, ext = os.path.splitext(fname)
     return f"{base}{suffix}{ext}"
-
-def _bin_width(label: str) -> float:
-    s = str(label)
-    if "-" in s:
-        lo, hi = s.split("-")
-        return float(hi) - float(lo) + 1.0
-    if s.endswith("+"):
-        return 5.0
-    return 1.0
-
-def _widths_from_index(idx) -> np.ndarray:
-    return np.array([_bin_width(x) for x in idx], dtype=float)
 
 def _tfr_from_asfr_df(asfr_df: pd.DataFrame) -> float:
     s = asfr_df["asfr"].astype(float)
@@ -231,7 +239,22 @@ def _smooth_tfr(TFR0: float, target: float, years: int, step: int, kind: str = "
         raise ValueError(f"Unknown TFR path kind: {kind!r}")
 
 def fill_missing_age_bins(s: pd.Series) -> pd.Series:
-    return s.reindex(EXPECTED_BINS, fill_value=0)
+    return s.reindex(EDAD_ORDER, fill_value=0.0)
+
+def _ridx(s_like) -> pd.Series:
+    """
+    Duplicate-safe reindex to EDAD_ORDER:
+      - coerce to Series
+      - normalize index to stripped strings
+      - if duplicate labels exist, aggregate by sum
+      - reindex to EDAD_ORDER and cast to float
+    """
+    s = pd.Series(s_like, copy=False)
+    s.index = pd.Index(map(str, s.index)).str.strip()
+    if s.index.has_duplicates:
+        s = s.groupby(level=0, sort=False).sum()
+        s.index = pd.Index(map(str, s.index)).str.strip()
+    return s.reindex(EDAD_ORDER, fill_value=0.0).astype(float)
 
 # ------------------------------- Main procedure -------------------------------
 
@@ -241,8 +264,6 @@ def main_wrapper(conteos, emi, imi, projection_range, sample_type, distribution=
 
     asfr_weights = {}
     asfr_baseline = {}
-
-    last_obs_year_by_death = dict(LAST_OBS_YEAR)
 
     # Target TFR loading/diagnostics
     target_tfrs = None
@@ -330,8 +351,13 @@ def main_wrapper(conteos, emi, imi, projection_range, sample_type, distribution=
         proj_M = pd.DataFrame()
         proj_T = pd.DataFrame()
 
-        for year in tqdm(projection_range):
-            for DPTO in DTPO_list:
+        # keep the last available LTs to reuse when we don't rebuild
+        lt_M_t = None
+        lt_F_t = None
+        lt_T_t = None
+
+        for year in tqdm(range(START_YEAR, END_YEAR + 1, STEP_YEARS)):
+            for DPTO in (list(conteos["DPTO_NOMBRE"].unique()) + ["total_nacional"]):
                 if DPTO != "total_nacional":
                     conteos_all = conteos[conteos["DPTO_NOMBRE"] == DPTO]
                 else:
@@ -340,83 +366,70 @@ def main_wrapper(conteos, emi, imi, projection_range, sample_type, distribution=
                 conteos_all_M = conteos_all[conteos_all["SEXO"] == 1.0]
                 conteos_all_F = conteos_all[conteos_all["SEXO"] == 2.0]
 
-                if (death_choice == "censo_2018"):
+                # ------------------- select deaths source by death_choice/year
+                if death_choice == "censo_2018":
+                    year_for_deaths = 2018
                     conteos_all_M = conteos_all_M[conteos_all_M["ANO"] == 2018]
+                    conteos_all_F = conteos_all_F[conteos_all_F["ANO"] == 2018]
                     conteos_all_M_d = conteos_all_M[(conteos_all_M["VARIABLE"] == "defunciones") & (conteos_all_M["FUENTE"] == "censo_2018")]
-                    conteos_all_F = conteos_all_F[conteos_all_F["ANO"] == 2018]
                     conteos_all_F_d = conteos_all_F[(conteos_all_F["VARIABLE"] == "defunciones") & (conteos_all_F["FUENTE"] == "censo_2018")]
+
                 elif death_choice == "EEVV":
-                    if year > LAST_OBS_YEAR["EEVV"]:
-                        yref = LAST_OBS_YEAR["EEVV"]
-                        conteos_all_M = conteos_all_M[conteos_all_M["ANO"] == yref]
-                        conteos_all_M_d = conteos_all_M[(conteos_all_M["VARIABLE"] == "defunciones") & (conteos_all_M["FUENTE"] == "EEVV")]
-                        conteos_all_F = conteos_all_F[conteos_all_F["ANO"] == yref]
-                        conteos_all_F_d = conteos_all_F[(conteos_all_F["VARIABLE"] == "defunciones") & (conteos_all_F["FUENTE"] == "EEVV")]
-                    else:
-                        conteos_all_M = conteos_all_M[conteos_all_M["ANO"] == year]
-                        conteos_all_M_d = conteos_all_M[(conteos_all_M["VARIABLE"] == "defunciones") & (conteos_all_M["FUENTE"] == "EEVV")]
-                        conteos_all_F = conteos_all_F[conteos_all_F["ANO"] == year]
-                        conteos_all_F_d = conteos_all_F[(conteos_all_F["VARIABLE"] == "defunciones") & (conteos_all_F["FUENTE"] == "EEVV")]
+                    year_for_deaths = min(year, LAST_OBS_YEAR["EEVV"])
+                    conteos_all_M = conteos_all_M[conteos_all_M["ANO"] == year_for_deaths]
+                    conteos_all_F = conteos_all_F[conteos_all_F["ANO"] == year_for_deaths]
+                    conteos_all_M_d = conteos_all_M[(conteos_all_M["VARIABLE"] == "defunciones") & (conteos_all_M["FUENTE"] == "EEVV")]
+                    conteos_all_F_d = conteos_all_F[(conteos_all_F["VARIABLE"] == "defunciones") & (conteos_all_F["FUENTE"] == "EEVV")]
+
                 elif death_choice == "midpoint":
+                    year_for_deaths = 2018
                     conteos_all_M = conteos_all_M[conteos_all_M["ANO"] == 2018]
                     conteos_all_F = conteos_all_F[conteos_all_F["ANO"] == 2018]
-                    conteos_all_M_d_1 = conteos_all_M[(conteos_all_M["VARIABLE"] == "defunciones") & (conteos_all_M["FUENTE"] == "EEVV")]
-                    conteos_all_F_d_1 = conteos_all_F[(conteos_all_F["VARIABLE"] == "defunciones") & (conteos_all_F["FUENTE"] == "EEVV")]
-                    conteos_all_M_d_2 = conteos_all_M[(conteos_all_M["VARIABLE"] == "defunciones") & (conteos_all_M["FUENTE"] == "censo_2018")]
-                    conteos_all_F_d_2 = conteos_all_F[(conteos_all_F["VARIABLE"] == "defunciones") & (conteos_all_F["FUENTE"] == "censo_2018")]
-                    conteos_all_M_d = pd.merge(conteos_all_M_d_1, conteos_all_M_d_2,
+                    M_d1 = conteos_all_M[(conteos_all_M["VARIABLE"] == "defunciones") & (conteos_all_M["FUENTE"] == "EEVV")]
+                    F_d1 = conteos_all_F[(conteos_all_F["VARIABLE"] == "defunciones") & (conteos_all_F["FUENTE"] == "EEVV")]
+                    M_d2 = conteos_all_M[(conteos_all_M["VARIABLE"] == "defunciones") & (conteos_all_M["FUENTE"] == "censo_2018")]
+                    F_d2 = conteos_all_F[(conteos_all_F["VARIABLE"] == "defunciones") & (conteos_all_F["FUENTE"] == "censo_2018")]
+                    conteos_all_M_d = pd.merge(M_d1, M_d2,
                                                on=["DPTO_NOMBRE","SEXO","EDAD","ANO","VARIABLE"], suffixes=("_EEVV","_censo"))
                     conteos_all_M_d["VALOR_corrected"] = 0.5 * (conteos_all_M_d["VALOR_corrected_EEVV"] + conteos_all_M_d["VALOR_corrected_censo"])
                     conteos_all_M_d = conteos_all_M_d[["DPTO_NOMBRE","SEXO","EDAD","ANO","VARIABLE","VALOR_corrected"]]
-                    conteos_all_F_d = pd.merge(conteos_all_F_d_1, conteos_all_F_d_2,
+                    conteos_all_F_d = pd.merge(F_d1, F_d2,
                                                on=["DPTO_NOMBRE","SEXO","EDAD","ANO","VARIABLE"], suffixes=("_EEVV","_censo"))
                     conteos_all_F_d["VALOR_corrected"] = 0.5 * (conteos_all_F_d["VALOR_corrected_EEVV"] + conteos_all_F_d["VALOR_corrected_censo"])
                     conteos_all_F_d = conteos_all_F_d[["DPTO_NOMBRE","SEXO","EDAD","ANO","VARIABLE","VALOR_corrected"]]
+                else:
+                    raise ValueError(f"Unknown death_choice: {death_choice}")
 
+                # births (EEVV)
                 conteos_all_M_n = conteos_all_M[(conteos_all_M["VARIABLE"] == "nacimientos") & (conteos_all_M["FUENTE"] == "EEVV")]
                 conteos_all_F_n = conteos_all_F[(conteos_all_F["VARIABLE"] == "nacimientos") & (conteos_all_F["FUENTE"] == "EEVV")]
 
-                if (death_choice == "censo_2018") or (death_choice == "midpoint"):
+                # population exposures used to compute rates
+                if (death_choice in ("censo_2018", "midpoint")) or (year == 2018):
                     conteos_all_M_p = conteos_all_M[(conteos_all_M["VARIABLE"] == "poblacion_total") & (conteos_all_M["FUENTE"] == "censo_2018")]
                     conteos_all_F_p = conteos_all_F[(conteos_all_F["VARIABLE"] == "poblacion_total") & (conteos_all_F["FUENTE"] == "censo_2018")]
                 else:
-                    if year == 2018:
-                        conteos_all_M_p = conteos_all_M[(conteos_all_M["VARIABLE"] == "poblacion_total") & (conteos_all_M["FUENTE"] == "censo_2018")]
-                        conteos_all_F_p = conteos_all_F[(conteos_all_F["VARIABLE"] == "poblacion_total") & (conteos_all_F["FUENTE"] == "censo_2018")]
-                    elif (year > 2018 and year <= LAST_OBS_YEAR["EEVV"]):
-                        conteos_all_F_p = proj_F[(proj_F["year"] == year) & (proj_F["DPTO_NOMBRE"] == DPTO) & (proj_F["death_choice"] == death_choice)]
-                        conteos_all_M_p = proj_M[(proj_M["year"] == year) & (proj_M["DPTO_NOMBRE"] == DPTO) & (proj_M["death_choice"] == death_choice)]
+                    # for EEVV after 2018, use last computed projected exposures for this DPTO & year
+                    conteos_all_F_p = proj_F[(proj_F["year"] == year) & (proj_F["DPTO_NOMBRE"] == DPTO) & (proj_F["death_choice"] == death_choice)]
+                    conteos_all_M_p = proj_M[(proj_M["year"] == year) & (proj_M["DPTO_NOMBRE"] == DPTO) & (proj_M["death_choice"] == death_choice)]
 
-                if year > 2018:
-                    conteos_all_F_p_updated = proj_F[(proj_F["year"] == year) & (proj_F["DPTO_NOMBRE"] == DPTO) & (proj_F["death_choice"] == death_choice)]
-                    conteos_all_M_p_updated = proj_M[(proj_M["year"] == year) & (proj_M["DPTO_NOMBRE"] == DPTO) & (proj_M["death_choice"] == death_choice)]
+                # convenience: aggregate by EDAD now (avoid duplicate labels downstream)
+                conteos_all_M_n_t = conteos_all_M_n.groupby("EDAD")["VALOR_corrected"].sum()
+                conteos_all_F_n_t = conteos_all_F_n.groupby("EDAD")["VALOR_corrected"].sum()
+                conteos_all_M_d_t = conteos_all_M_d.groupby("EDAD")["VALOR_corrected"].sum()
+                conteos_all_F_d_t = conteos_all_F_d.groupby("EDAD")["VALOR_corrected"].sum()
+                conteos_all_M_p_t = conteos_all_M_p.groupby("EDAD")["VALOR_corrected"].sum()
+                conteos_all_F_p_t = conteos_all_F_p.groupby("EDAD")["VALOR_corrected"].sum()
 
-                if DPTO == "total_nacional":
-                    conteos_all_M_n_t = conteos_all_M_n.groupby(["EDAD"])["VALOR_corrected"].sum()
-                    conteos_all_F_n_t = conteos_all_F_n.groupby(["EDAD"])["VALOR_corrected"].sum()
-                    conteos_all_M_d_t = conteos_all_M_d.groupby(["EDAD"])["VALOR_corrected"].sum()
-                    conteos_all_F_d_t = conteos_all_F_d.groupby(["EDAD"])["VALOR_corrected"].sum()
-                    conteos_all_M_p_t = conteos_all_M_p.groupby(["EDAD"])["VALOR_corrected"].sum()
-                    conteos_all_F_p_t = conteos_all_F_p.groupby(["EDAD"])["VALOR_corrected"].sum()
-                    if year > 2018:
-                        conteos_all_F_p_t_updated = conteos_all_F_p_updated.groupby(["EDAD"])["VALOR_corrected"].sum()
-                        conteos_all_M_p_t_updated = conteos_all_M_p_updated.groupby(["EDAD"])["VALOR_corrected"].sum()
-                else:
-                    conteos_all_M_n_t = conteos_all_M_n.set_index("EDAD")["VALOR_corrected"]
-                    conteos_all_F_n_t = conteos_all_F_n.set_index("EDAD")["VALOR_corrected"]
-                    conteos_all_M_d_t = conteos_all_M_d.set_index("EDAD")["VALOR_corrected"]
-                    conteos_all_F_d_t = conteos_all_F_d.set_index("EDAD")["VALOR_corrected"]
-                    conteos_all_M_p_t = conteos_all_M_p.set_index("EDAD")["VALOR_corrected"]
-                    conteos_all_F_p_t = conteos_all_F_p.set_index("EDAD")["VALOR_corrected"]
-                    if year > 2018:
-                        conteos_all_M_p_t_updated = conteos_all_M_p_updated.set_index("EDAD")["VALOR_corrected"]
-                        conteos_all_F_p_t_updated = conteos_all_F_p_updated.set_index("EDAD")["VALOR_corrected"]
+                if year > 2018 and death_choice == "EEVV":
+                    conteos_all_F_p_t_updated = conteos_all_F_p_t.copy()
+                    conteos_all_M_p_t_updated = conteos_all_M_p_t.copy()
 
                 # --- ratio to align national totals
                 edad_order = EDAD_ORDER
 
                 if year == 2018:
-                    lhs_M = (pd.Series(conteos_all_M_p_t).reindex(edad_order, fill_value=0).astype(float).rename("lhs"))
+                    lhs_M = _ridx(conteos_all_M_p_t).rename("lhs")
                     rhs_M = (conteos[(conteos["DPTO_NOMBRE"] != "total_nacional") & (conteos["SEXO"] == 1) &
                                      (conteos["ANO"] == 2018) & (conteos["VARIABLE"] == "poblacion_total") &
                                      (conteos["FUENTE"] == "censo_2018")]
@@ -424,7 +437,7 @@ def main_wrapper(conteos, emi, imi, projection_range, sample_type, distribution=
                              .reindex(edad_order, fill_value=0).astype(float).rename("rhs"))
                     ratio_M = lhs_M.div(rhs_M.replace(0, np.nan))
 
-                    lhs_F = (pd.Series(conteos_all_F_p_t).reindex(edad_order, fill_value=0).astype(float).rename("lhs"))
+                    lhs_F = _ridx(conteos_all_F_p_t).rename("lhs")
                     rhs_F = (conteos[(conteos["DPTO_NOMBRE"] != "total_nacional") & (conteos["SEXO"] == 2) &
                                      (conteos["ANO"] == 2018) & (conteos["VARIABLE"] == "poblacion_total") &
                                      (conteos["FUENTE"] == "censo_2018")]
@@ -432,17 +445,19 @@ def main_wrapper(conteos, emi, imi, projection_range, sample_type, distribution=
                              .reindex(edad_order, fill_value=0).astype(float).rename("rhs"))
                     ratio_F = lhs_F.div(rhs_F.replace(0, np.nan))
                 else:
-                    lhs_M = (pd.Series(conteos_all_M_p_t).reindex(edad_order, fill_value=0).astype(float).rename("lhs"))
+                    lhs_M = _ridx(conteos_all_M_p_t).rename("lhs")
                     rhs_M = proj_M[(proj_M["year"] == year) & (proj_M["DPTO_NOMBRE"] == "total_nacional") &
                                    (proj_M["death_choice"] == death_choice)].set_index("EDAD")["VALOR_corrected"]
+                    rhs_M = _ridx(rhs_M).rename("rhs")
                     ratio_M = lhs_M.div(rhs_M.replace(0, np.nan))
 
-                    lhs_F = (pd.Series(conteos_all_F_p_t).reindex(edad_order, fill_value=0).astype(float).rename("lhs"))
+                    lhs_F = _ridx(conteos_all_F_p_t).rename("lhs")
                     rhs_F = proj_F[(proj_F["year"] == year) & (proj_F["DPTO_NOMBRE"] == "total_nacional") &
                                    (proj_F["death_choice"] == death_choice)].set_index("EDAD")["VALOR_corrected"]
+                    rhs_F = _ridx(rhs_F).rename("rhs")
                     ratio_F = lhs_F.div(rhs_F.replace(0, np.nan))
 
-                # --- migration: latest available single-year flows, scaled to 5-year period
+                # --- migration: latest available flows, scaled to the projection period
                 flows_year = min(year, FLOWS_LATEST_YEAR)
                 imi_age_M = (imi.loc[(imi["ANO"] == flows_year) & (imi["SEXO"] == 1)]
                              .groupby("EDAD")["VALOR"].sum().reindex(edad_order, fill_value=0))
@@ -459,50 +474,70 @@ def main_wrapper(conteos, emi, imi, projection_range, sample_type, distribution=
                 net_F = PERIOD_YEARS * net_F_annual
 
                 # add half-period migration to exposures before rates; keep exposures > 0
-                conteos_all_M_p_t = (conteos_all_M_p_t + (net_M / 2.0)).clip(lower=1e-9)
-                conteos_all_F_p_t = (conteos_all_F_p_t + (net_F / 2.0)).clip(lower=1e-9)
+                conteos_all_M_p_t = (_ridx(conteos_all_M_p_t) + (net_M / 2.0)).clip(lower=1e-9)
+                conteos_all_F_p_t = (_ridx(conteos_all_F_p_t) + (net_F / 2.0)).clip(lower=1e-9)
+                if year > 2018 and death_choice == "EEVV":
+                    conteos_all_M_p_t_updated = (_ridx(conteos_all_M_p_t_updated) + (net_M / 2.0)).clip(lower=1e-9)
+                    conteos_all_F_p_t_updated = (_ridx(conteos_all_F_p_t_updated) + (net_F / 2.0)).clip(lower=1e-9)
 
-                # --- Life tables (5-year block)
-                if ((death_choice == "EEVV") and (year < LAST_OBS_YEAR["EEVV"] + 1)) or ((death_choice != "EEVV") and (year == 2018)):
+                # ------------------- Life tables: build & save IFF deaths exist for that source-year
+                # conditions to rebuild for this year
+                deaths_sum = float(conteos_all_M_d_t.sum() + conteos_all_F_d_t.sum())
+                rebuild_lt_this_year = (
+                    (death_choice == "EEVV" and (year <= LAST_OBS_YEAR["EEVV"]) and deaths_sum > 0.0) or
+                    (death_choice in ("censo_2018", "midpoint") and year == 2018 and deaths_sum > 0.0)
+                )
+
+                if rebuild_lt_this_year:
+                    # choose exposures matching the death source-year context
+                    if death_choice == "EEVV" and year > 2018:
+                        exp_M = fill_missing_age_bins(conteos_all_M_p_t_updated)
+                        exp_F = fill_missing_age_bins(conteos_all_F_p_t_updated)
+                    else:
+                        exp_M = fill_missing_age_bins(conteos_all_M_p_t)
+                        exp_F = fill_missing_age_bins(conteos_all_F_p_t)
+
                     lt_M_t = make_lifetable(
                         fill_missing_age_bins(conteos_all_M_d_t).index,
-                        fill_missing_age_bins(conteos_all_M_p_t),
+                        exp_M,
                         fill_missing_age_bins(conteos_all_M_d_t),
-                        # pass MA control from YAML
-                        use_ma=LT_USE_MA, ma_window=LT_MA_WINDOW
+                        use_ma=CFG.get("mortality", {}).get("use_ma", True),
+                        ma_window=int(CFG.get("mortality", {}).get("ma_window", 5)),
                     )
                     lt_F_t = make_lifetable(
                         fill_missing_age_bins(conteos_all_F_d_t).index,
-                        fill_missing_age_bins(conteos_all_F_p_t),
+                        exp_F,
                         fill_missing_age_bins(conteos_all_F_d_t),
-                        use_ma=LT_USE_MA, ma_window=LT_MA_WINDOW
+                        use_ma=CFG.get("mortality", {}).get("use_ma", True),
+                        ma_window=int(CFG.get("mortality", {}).get("ma_window", 5)),
                     )
                     lt_T_t = make_lifetable(
                         fill_missing_age_bins(conteos_all_M_d_t).index,
-                        fill_missing_age_bins(conteos_all_M_p_t) + fill_missing_age_bins(conteos_all_F_p_t),
+                        exp_M + exp_F,
                         fill_missing_age_bins(conteos_all_M_d_t) + fill_missing_age_bins(conteos_all_F_d_t),
-                        use_ma=LT_USE_MA, ma_window=LT_MA_WINDOW
+                        use_ma=CFG.get("mortality", {}).get("use_ma", True),
+                        ma_window=int(CFG.get("mortality", {}).get("ma_window", 5)),
                     )
                     # write LTs
-                    if distribution is None:
-                        lt_path = os.path.join(PATHS["results_dir"], "lifetables", DPTO, sample_type, death_choice, str(year))
-                    else:
-                        lt_path = os.path.join(PATHS["results_dir"], "lifetables", DPTO, sample_type, death_choice, distribution, str(year))
-                    os.makedirs(lt_path, exist_ok=True)
-                    lt_M_t.to_csv(os.path.join(lt_path, _with_suffix(FILENAMES["lt_M"], suffix)))
-                    lt_F_t.to_csv(os.path.join(lt_path, _with_suffix(FILENAMES["lt_F"], suffix)))
-                    lt_T_t.to_csv(os.path.join(lt_path, _with_suffix(FILENAMES["lt_T"], suffix)))
+                    if lt_M_t is not None and lt_F_t is not None and lt_T_t is not None:
+                        if distribution is None:
+                            lt_path = os.path.join(PATHS["results_dir"], "lifetables", DPTO, sample_type, death_choice, str(year_for_deaths))
+                        else:
+                            lt_path = os.path.join(PATHS["results_dir"], "lifetables", DPTO, sample_type, death_choice, distribution, str(year_for_deaths))
+                        os.makedirs(lt_path, exist_ok=True)
+                        lt_M_t.to_csv(os.path.join(lt_path, _with_suffix(LT_NAME_M, f"_{draw}" if distribution else "")))
+                        lt_F_t.to_csv(os.path.join(lt_path, _with_suffix(LT_NAME_F, f"_{draw}" if distribution else "")))
+                        lt_T_t.to_csv(os.path.join(lt_path, _with_suffix(LT_NAME_T, f"_{draw}" if distribution else "")))
 
-                # --- ASFR (unchanged) ...
-                cutoff = last_obs_year_by_death[death_choice]
+                # ------------------- ASFR
+                cutoff = LAST_OBS_YEAR.get(death_choice, 2018)
                 key = (DPTO, death_choice)
 
                 asfr_df = compute_asfr(
                     conteos_all_F_n_t.index,
                     pd.Series(conteos_all_F_p_t[conteos_all_F_p_t.index.isin(conteos_all_F_n_t.index)]),
                     pd.Series(conteos_all_F_n_t) + pd.Series(conteos_all_M_n_t)
-                )
-                asfr_df = asfr_df[["population","births","asfr"]].astype(float)
+                ).astype(float)
 
                 if year <= cutoff:
                     TFR0 = _tfr_from_asfr_df(asfr_df)
@@ -545,55 +580,61 @@ def main_wrapper(conteos, emi, imi, projection_range, sample_type, distribution=
                     chk = float(np.sum(proj_df["asfr"].values * widths))
                     if not np.isfinite(chk) or abs(chk - TFR_t) > 1e-6:
                         raise AssertionError(f"Normalization failed for {key} year {year}: {chk} vs {TFR_t}")
-                    asfr_df = proj_df
                     asfr = proj_df
 
-                if distribution is None:
-                    asfr_path = os.path.join(PATHS["results_dir"], "asfr", DPTO, sample_type, str(year))
-                else:
-                    asfr_path = os.path.join(PATHS["results_dir"], "asfr", DPTO, sample_type, distribution, str(year))
-                os.makedirs(asfr_path, exist_ok=True)
-                asfr_df.to_csv(os.path.join(asfr_path, _with_suffix(FILENAMES["asfr"], suffix)))
-
+                # ------------------- Projection step (always project one step ahead)
+                if lt_F_t is None or lt_M_t is None:
+                    raise RuntimeError("Life tables not initialized before projection.")
                 if year == 2018:
                     L_MM, L_MF, L_FF, age_structures_df_M, age_structures_df_F, age_structures_df_T = make_projections(
                         net_F, net_M, len(lt_F_t) - 1, 1, 2,
-                        pd.Series(conteos_all_M_n_t), pd.Series(conteos_all_F_n_t),
+                        _ridx(conteos_all_M_n_t), _ridx(conteos_all_F_n_t),
                         lt_F_t, lt_M_t,
-                        pd.Series(conteos_all_F_p_t), pd.Series(conteos_all_M_p_t),
+                        _ridx(conteos_all_F_p_t), _ridx(conteos_all_M_p_t),
                         asfr, 100000, year, DPTO, death_choice=death_choice
                     )
                 else:
                     L_MM, L_MF, L_FF, age_structures_df_M, age_structures_df_F, age_structures_df_T = make_projections(
                         net_F, net_M, len(lt_F_t) - 1, 1, 2,
-                        pd.Series(conteos_all_M_n_t), pd.Series(conteos_all_F_n_t),
+                        _ridx(conteos_all_M_n_t), _ridx(conteos_all_F_n_t),
                         lt_F_t, lt_M_t,
-                        pd.Series(conteos_all_F_p_t_updated), pd.Series(conteos_all_M_p_t_updated),
+                        _ridx(conteos_all_F_p_t_updated if death_choice == "EEVV" else conteos_all_F_p_t),
+                        _ridx(conteos_all_M_p_t_updated if death_choice == "EEVV" else conteos_all_M_p_t),
                         asfr, 100000, year, DPTO, death_choice=death_choice
                     )
+
                 save_LL(L_MM, L_MF, L_FF, death_choice, DPTO, sample_type, distribution, suffix, year)
 
                 proj_F = pd.concat([proj_F, age_structures_df_F], axis=0, ignore_index=True, sort=False)
                 proj_M = pd.concat([proj_M, age_structures_df_M], axis=0, ignore_index=True, sort=False)
                 proj_T = pd.concat([proj_T, age_structures_df_T], axis=0, ignore_index=True, sort=False)
 
+        # persist projections for this death_choice
         save_projections(proj_F, proj_M, proj_T, sample_type, distribution, suffix, death_choice, year)
 
 # ----------------------------------- main -------------------------------------
 
 if __name__ == "__main__":
+    # dynamic step/period from UNABR
     projection_range = range(START_YEAR, END_YEAR + 1, STEP_YEARS)
 
-    # If your loader accepts a base path, pass it (as you wrote in your message)
     data = load_all_data(PATHS["data_dir"])
     conteos = data["conteos"]
 
-    emi = conteos[conteos["VARIABLE"] == "crt_visa_F_emigracion"]
-    imi = conteos[conteos["VARIABLE"] == "crt_visa_F_inmigracion"]
+    # Be liberal with migration label conventions
+    mig_names_out = ["flujo_emigracion"]
+    mig_names_in  = ["flujo_inmigracion"]
+    emi = conteos[conteos["VARIABLE"].isin(mig_names_out)].copy()
+    imi = conteos[conteos["VARIABLE"].isin(mig_names_in)].copy()
 
     tasks = []
+    mode = CFG.get("runs", {}).get("mode", "no_draws")
     if len(sys.argv) > 1 and sys.argv[1] == "draws":
+        mode = "draws"
+
+    if mode == "draws":
         print("We'll be running this with draws")
+        DRAWS = CFG["runs"]["draws"]
         num_draws = int(DRAWS.get("num_draws", 1000))
         dist_types = list(DRAWS.get("dist_types", ["uniform", "pert", "beta", "normal"]))
         label_pattern = str(DRAWS.get("label_pattern", "{dist}_draw_{i}"))
@@ -603,6 +644,7 @@ if __name__ == "__main__":
                 tasks.append(("draw", dist, label))
     else:
         print("We'll be running this without draws")
+        NO_DRAWS_TASKS = CFG["runs"]["no_draws_tasks"]
         for t in NO_DRAWS_TASKS:
             tasks.append((t["sample_type"], t["distribution"], t["label"]))
 
@@ -628,13 +670,41 @@ if __name__ == "__main__":
         df = pd.concat(processed_subsets, axis=0, ignore_index=True)
         df = df[df["EDAD"].notna()].copy()
 
-        if dist is None:
-            main_wrapper(df, emi, imi, projection_range, label)
+        SERIES_KEYS = ["DPTO_NOMBRE","DPTO_CODIGO","ANO","SEXO","VARIABLE","FUENTE","OMISION"]
+
+        if UNABR:
+            # Tail harmonization BEFORE unabridging (pop & deaths to 90+; migration tails to 90+).
+            df = harmonize_conteos_to_90plus(df, SERIES_KEYS, value_col="VALOR_corrected")
+            pop_ref = df[df["VARIABLE"] == "poblacion_total"].copy()
+            emi_90 = harmonize_migration_to_90plus(emi, pop_ref, SERIES_KEYS, value_col="VALOR", pop_value_col="VALOR_corrected")
+            imi_90 = harmonize_migration_to_90plus(imi, pop_ref, SERIES_KEYS, value_col="VALOR", pop_value_col="VALOR_corrected")
+
+            # Unabridge conteos (VALOR_corrected) and migration (VALOR) to 1-year EDADs
+            unabridged = unabridge_all(
+                df=df, emi=emi_90, imi=imi_90,
+                series_keys=SERIES_KEYS,
+                conteos_value_col="VALOR_corrected",
+                ridge=1e-6,
+            )
+            save_unabridged(unabridged, os.path.join(PATHS["results_dir"], "unabridged"))
+
+            conteos_in = unabridged["conteos"]
+            emi_in     = unabridged["emi"]
+            imi_in     = unabridged["imi"]
         else:
-            main_wrapper(df, emi, imi, projection_range, "draw", dist, label)
+            # In 5-year mode we keep original bins and tails; no harmonization to 90+.
+            conteos_in = df
+            emi_in     = emi.copy()
+            imi_in     = imi.copy()
+
+        # Run projections with dynamic periodicity
+        if dist is None:
+            main_wrapper(conteos_in, emi_in, imi_in, projection_range, label)
+        else:
+            main_wrapper(conteos_in, emi_in, imi_in, projection_range, "draw", dist, label)
         return label
 
-    n_workers = N_PROCS if N_PROCS > 0 else 1
+    n_workers = int(CFG.get("parallel", {}).get("processes", 1)) or 1
     with Pool(n_workers) as pool:
         for _ in tqdm(pool.imap_unordered(_execute_task, tasks), total=len(tasks), desc="Tasks"):
             pass

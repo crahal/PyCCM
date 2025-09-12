@@ -8,6 +8,9 @@ paths:
 diagnostics:
   print_target_csv: true
 
+unabridging:
+  enabled: true
+
 projections:
   start_year: 2018
   end_year: 2070

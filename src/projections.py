@@ -5,37 +5,76 @@ import pandas as pd
 
 
 def save_projections(proj_F, proj_M, proj_T, sample_type, distribution, suffix, death_choice, year):
-    base_proj_path = os.path.join('..', 'results', 'projections')
-    for df_struct, key in [(proj_F, 'age_structures_df_F'),
-                           (proj_M, 'age_structures_df_M'),
-                           (proj_T, 'age_structures_df_T')]:
+    """
+    Persist the per-step age structures as CSVs.
+    """
+    base_proj_path = os.path.join("..", "results", "projections")
+    for df_struct, key in [
+        (proj_F, "age_structures_df_F"),
+        (proj_M, "age_structures_df_M"),
+        (proj_T, "age_structures_df_T"),
+    ]:
         out_path = os.path.join(base_proj_path, key, sample_type)
         if distribution:
             out_path = os.path.join(out_path, distribution)
         os.makedirs(out_path, exist_ok=True)
-        df_struct.to_csv(os.path.join(out_path, f'{key}{suffix}{death_choice}.csv'))
+        df_struct.to_csv(os.path.join(out_path, f"{key}{suffix}{death_choice}.csv"))
 
 
 def save_LL(L_MM, L_MF, L_FF, death_choice, DPTO, sample_type, distribution, suffix, year):
-    base_proj_path = os.path.join('..', 'results', 'projections', death_choice, DPTO)
-    for label, mat in [('L_MM', L_MM), ('L_MF', L_MF), ('L_FF', L_FF)]:
+    """
+    Persist Leslie submatrices for auditability.
+    """
+    base_proj_path = os.path.join("..", "results", "projections", death_choice, DPTO)
+    for label, mat in [("L_MM", L_MM), ("L_MF", L_MF), ("L_FF", L_FF)]:
         out_path = os.path.join(base_proj_path, sample_type)
         if distribution:
             out_path = os.path.join(out_path, distribution)
         os.makedirs(out_path, exist_ok=True)
-        pd.DataFrame(mat).to_csv(os.path.join(out_path, f'{label}{suffix}{year}.csv'))
+        pd.DataFrame(mat).to_csv(os.path.join(out_path, f"{label}{suffix}{year}.csv"))
 
+
+# ------------------------ helpers for labels / hazards ------------------------
 
 def _s_open_from_ex(step: float, e: float) -> float:
+    """Survival over one step in the open interval, using e_omega."""
     if not np.isfinite(e) or e <= 0:
         return 0.0
     return float(np.clip(np.exp(-step / e), 0.0, 1.0))
 
 
 def _hazard_from_survival(s: float, step: float) -> float:
+    """Constant-force hazard that yields survival s over width `step`."""
     s = float(np.clip(s, 1e-12, 1.0))
     return -np.log(s) / step
 
+
+def _format_age_labels_from_lifetable_index(ages: np.ndarray, step: int) -> list[str]:
+    """
+    Build EDAD labels consistent with the pipeline:
+      - if step == 1: '0','1',...,'(last-1)','last+' (open interval)
+      - if step >= 5: '0-(0+step-1)', ..., 'last+'
+    """
+    ages = np.asarray(ages, int)
+    if ages.size == 0:
+        return []
+
+    if step == 1:
+        labels = [str(a) for a in ages]
+        labels[-1] = f"{ages[-1]}+"
+        return labels
+
+    # abridged
+    labels = []
+    for i, a in enumerate(ages):
+        if i < len(ages) - 1:
+            labels.append(f"{a}-{a + step - 1}")
+        else:
+            labels.append(f"{a}+")
+    return labels
+
+
+# -------------------------------- projections ---------------------------------
 
 def make_projections(
     net_F, net_M,
@@ -55,6 +94,12 @@ def make_projections(
     mort_improv_F: float = 0.015,
     mort_improv_M: float = 0.015
 ):
+    """
+    Build sex-specific Leslie matrices and project one step ahead (X usually = 1).
+    Works transparently in UNABRIDGED (single-year) and ABRIDGED (5-year) modes by
+    inspecting the lifetable index spacing.
+    """
+    # dimension from lifetable (k rows including the open interval)
     k = n + 1
     columns = [f"t+{i}" for i in range(X + 1)]
 
@@ -62,16 +107,20 @@ def make_projections(
     L_MF = np.zeros((k, k))
     L_MM = np.zeros((k, k))
 
+    # sex ratio at birth -> shares
     srb = float(np.nansum(conteos_all_2018_M_n_t) / np.nansum(conteos_all_2018_F_n_t))
     p_f = 1.0 / (1.0 + srb)
     p_m = srb / (1.0 + srb)
 
+    # time step width from lifetable (1 in UNABRIDGED, 5 in ABRIDGED)
     if "n" in lt_2018_F_t.columns:
         step = float(lt_2018_F_t["n"].iloc[0])
     else:
         age_idx = np.asarray(lt_2018_F_t.index, dtype=float)
         step = float(age_idx[1] - age_idx[0])
+    step_int = int(round(step))
 
+    # base survivals from lx
     if "lx" not in lt_2018_F_t.columns or "lx" not in lt_2018_M_t.columns:
         raise ValueError("Life tables must include an 'lx' column.")
     lxf = lt_2018_F_t["lx"].to_numpy(dtype=float)
@@ -82,19 +131,26 @@ def make_projections(
     sF_base = np.ones(k, dtype=float)
     sM_base = np.ones(k, dtype=float)
     for i in range(1, k):
-        sF_base[i] = lxf[i] / lxf[i - 1]
-        sM_base[i] = lxm[i] / lxm[i - 1]
+        # if a previous lx is zero (shouldn't happen after the lifetable fixes),
+        # the ratio will be nan; keep it robust by zeroing survival in that case.
+        denom_f = lxf[i - 1]
+        denom_m = lxm[i - 1]
+        sF_base[i] = lxf[i] / denom_f if denom_f > 0 else 0.0
+        sM_base[i] = lxm[i] / denom_m if denom_m > 0 else 0.0
 
+    # open-interval survivals from e_omega
     eF = float(lt_2018_F_t["ex"].iloc[-1])
     eM = float(lt_2018_M_t["ex"].iloc[-1])
     sF_open_base = _s_open_from_ex(step, eF)
     sM_open_base = _s_open_from_ex(step, eM)
 
+    # hazards (per step)
     mF_base = np.array([_hazard_from_survival(s, step) for s in sF_base], dtype=float)
     mM_base = np.array([_hazard_from_survival(s, step) for s in sM_base], dtype=float)
     mF_base[-1] = _hazard_from_survival(sF_open_base, step)
     mM_base[-1] = _hazard_from_survival(sM_open_base, step)
 
+    # ASFR alignment
     if hasattr(asfr_2018, "columns"):
         asfr_series = asfr_2018["asfr"]
         asfr_index = asfr_2018.index
@@ -115,6 +171,7 @@ def make_projections(
         raise ValueError("Fertility columns exceed matrix dimension; check fert_start_idx and ASFR length.")
     births_per_woman = step * asfr_series.to_numpy(dtype=float)
 
+    # initial age structures (female/male)
     n0_F = np.asarray(conteos_all_2018_F_p_t, dtype=float).copy()
     n0_M = np.asarray(conteos_all_2018_M_p_t, dtype=float).copy()
     if n0_F.shape[0] != k or n0_M.shape[0] != k:
@@ -123,86 +180,79 @@ def make_projections(
     n_proj_F = [n0_F]
     n_proj_M = [n0_M]
 
+    # project forward X steps; in the yearly pipeline X=1 each calendar year
     for t in range(1, X + 1):
-        mF_t = mF_base * (1.0 - float(mort_improv_F))**t
-        mM_t = mM_base * (1.0 - float(mort_improv_M))**t
+        mF_t = mF_base * (1.0 - float(mort_improv_F)) ** t
+        mM_t = mM_base * (1.0 - float(mort_improv_M)) ** t
         sF_t = np.exp(-mF_t * step)
         sM_t = np.exp(-mM_t * step)
 
-        L_FF.fill(0.0); L_MF.fill(0.0); L_MM.fill(0.0)
+        L_FF.fill(0.0)
+        L_MF.fill(0.0)
+        L_MM.fill(0.0)
 
+        # survival between adjacent ages
         for i in range(1, k):
             L_FF[i, i - 1] = sF_t[i]
             L_MM[i, i - 1] = sM_t[i]
 
+        # open interval self-loop
         L_FF[-1, -1] = sF_t[-1]
         L_MM[-1, -1] = sM_t[-1]
 
+        # births from female ages in fertility span; survive first step to age 0
         S0_t = sF_t[1] if k > 1 else 1.0
         for j, col in enumerate(fert_cols):
             L_FF[0, col] = p_f * S0_t * births_per_woman[j]
             L_MF[0, col] = p_m * S0_t * births_per_woman[j]
 
-        # one 5-year step; net_F/net_M are 5-year totals; we already added half before
+        # add half-period net migration (the other half was added to exposures pre-rates)
         n_next_F = (L_FF @ n_proj_F[-1]) + (net_F / 2)
         n_next_M = (L_MM @ n_proj_M[-1]) + (net_M / 2) + (L_MF @ n_proj_F[-1])
         n_proj_F.append(n_next_F)
         n_proj_M.append(n_next_M)
 
+    # assemble labeled outputs (keep single-year ages when step==1)
     try:
-        full_ages = lt_2018_F_t.index.astype(int)
+        base_ages = lt_2018_F_t.index.astype(int).to_numpy()
     except Exception:
         if "age" in lt_2018_F_t.columns:
-            full_ages = lt_2018_F_t["age"].astype(int).to_numpy()
+            base_ages = lt_2018_F_t["age"].astype(int).to_numpy()
         else:
             raise
 
+    edad_labels = _format_age_labels_from_lifetable_index(base_ages, step_int)
+
     age_structure_matrix_F = np.column_stack(n_proj_F)
-    age_structures_df_F = pd.DataFrame(age_structure_matrix_F, index=full_ages, columns=columns)
+    age_structures_df_F = pd.DataFrame(age_structure_matrix_F, index=edad_labels, columns=columns)
 
     age_structure_matrix_M = np.column_stack(n_proj_M)
-    age_structures_df_M = pd.DataFrame(age_structure_matrix_M, index=full_ages, columns=columns)
+    age_structures_df_M = pd.DataFrame(age_structure_matrix_M, index=edad_labels, columns=columns)
 
     age_structures_df_T = age_structures_df_F + age_structures_df_M
 
-    mapper = {
-        0: "0-4", 5: "5-9", 10: "10-14", 15: "15-19", 20: "20-24",
-        25: "25-29", 30: "30-34", 35: "35-39", 40: "40-44", 45: "45-49",
-        50: "50-54", 55: "55-59", 60: "60-64", 65: "65-69", 70: "70-74",
-        75: "75-79", 80: "80+"
-    }
+    # label with year + step
+    def _finalize(df, sex: str):
+        df = df.reset_index().rename(columns={"index": "EDAD"})
+        df["year"] = year + step_int
+        if "t+1" not in df.columns:
+            raise KeyError(f"Column 't+1' not found in {sex} projection matrix.")
+        df = df.rename(columns={"t+1": "VALOR_corrected"})
+        df["DPTO_NOMBRE"] = DPTO
+        df["death_choice"] = death_choice
+        return df[["EDAD", "DPTO_NOMBRE", "year", "VALOR_corrected", "death_choice"]]
 
-    # Label results with year + 5 (step width)
-    step_int = int(round(step))
+    age_structures_df_F = _finalize(age_structures_df_F, "female")
+    age_structures_df_M = _finalize(age_structures_df_M, "male")
 
-    age_structures_df_F = age_structures_df_F.reset_index().rename(columns={"index": "age"})
-    age_structures_df_F["year"] = year + step_int
-    if "t+1" not in age_structures_df_F.columns:
-        raise KeyError("Column 't+1' not found in female projection matrix.")
-    age_structures_df_F = age_structures_df_F.rename(columns={"age": "EDAD", "t+1": "VALOR_corrected"})
-    age_structures_df_F["EDAD"] = age_structures_df_F["EDAD"].map(mapper)
-    age_structures_df_F["DPTO_NOMBRE"] = DPTO
-    age_structures_df_F["death_choice"] = death_choice
-    age_structures_df_F = age_structures_df_F[["EDAD", "DPTO_NOMBRE", "year", "VALOR_corrected", "death_choice"]]
-
-    age_structures_df_M = age_structures_df_M.reset_index().rename(columns={"index": "age"})
-    age_structures_df_M["year"] = year + step_int
-    if "t+1" not in age_structures_df_M.columns:
-        raise KeyError("Column 't+1' not found in male projection matrix.")
-    age_structures_df_M = age_structures_df_M.rename(columns={"age": "EDAD", "t+1": "VALOR_corrected"})
-    age_structures_df_M["EDAD"] = age_structures_df_M["EDAD"].map(mapper)
-    age_structures_df_M["DPTO_NOMBRE"] = DPTO
-    age_structures_df_M["death_choice"] = death_choice
-    age_structures_df_M = age_structures_df_M[["EDAD", "DPTO_NOMBRE", "year", "VALOR_corrected", "death_choice"]]
-
-    age_structures_df_T = age_structures_df_T.reset_index().rename(columns={"index": "age"})
+    # total: keep same schema (including death_choice for uniformity)
+    age_structures_df_T = age_structures_df_T.reset_index().rename(columns={"index": "EDAD"})
     age_structures_df_T["year"] = year + step_int
     if "t+1" not in age_structures_df_T.columns:
         raise KeyError("Column 't+1' not found in total projection matrix.")
-    age_structures_df_T = age_structures_df_T.rename(columns={"age": "EDAD", "t+1": "VALOR_corrected"})
-    age_structures_df_T["EDAD"] = age_structures_df_T["EDAD"].map(mapper)
+    age_structures_df_T = age_structures_df_T.rename(columns={"t+1": "VALOR_corrected"})
     age_structures_df_T["DPTO_NOMBRE"] = DPTO
     age_structures_df_T["death_choice"] = death_choice
-    age_structures_df_T = age_structures_df_T[["EDAD", "DPTO_NOMBRE", "year", "VALOR_corrected"]]
+    age_structures_df_T = age_structures_df_T[["EDAD", "DPTO_NOMBRE", "year", "VALOR_corrected", "death_choice"]]
 
     return L_MM, L_MF, L_FF, age_structures_df_M, age_structures_df_F, age_structures_df_T

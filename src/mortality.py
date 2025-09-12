@@ -72,20 +72,6 @@ def _poisson_pspline_fit(
     Solves for f ∈ R^n minimizing:
         L(f) = sum_i (E_i * exp(f_i) - D_i * f_i) + (λ/2) ||D_k f||^2,
     where D_k is the k-th order finite-difference operator.
-
-    Parameters
-    ----------
-    E : exposures per single-year age (nonnegative)
-    D : deaths per single-year age (nonnegative; may be fractional)
-    lam : smoothing parameter (larger ⇒ smoother)
-    diff_order : order k of the difference penalty (typically 2 or 3)
-    max_iter : maximum IRLS/Newton steps
-    tol : infinity-norm step tolerance for convergence
-    verbose : if True, emits simple iteration diagnostics
-
-    Returns
-    -------
-    f : ndarray of shape (n,), the fitted log m at single-year ages.
     """
     n = D.size
     if n != E.size:
@@ -166,11 +152,6 @@ def pspline_group_qx(
       4) Convert to single-year probabilities q_k = 1 - exp(-m_k).
       5) Aggregate to interval probabilities: q_j = 1 - Π_k (1 - q_k) over k ∈ interval j.
          Set last (open) interval q = 1 by convention.
-
-    Returns
-    -------
-    q_int : ndarray of length m (one per abridged interval)
-    meta  : dict with fields {"lambda", "diff_order"} for record-keeping
     """
     ages = np.asarray(ages, float)
     widths = np.asarray(widths, float)
@@ -296,11 +277,14 @@ def make_lifetable(
         df.loc[0, "ax"] = 1.0/m0 - n0/np.expm1(m0 * n0)
 
     # 4) qx, px (from possibly-smoothed mx), then optionally replace with P-spline qx
+    #    Ensure non-terminal qx < 1 to avoid px = 0 cascades in survivorship.
     df["qx"] = (df["n"] * df["mx"]) / (1.0 + (df["n"] - df["ax"]) * df["mx"])
+    last = df.index[-1]
+    # cap non-terminal qx just below 1
+    df.loc[df.index[:-1], "qx"] = np.minimum(df.loc[df.index[:-1], "qx"].to_numpy(float), 1.0 - eps)
+    df.loc[last, "qx"] = 1.0
     df["qx"] = df["qx"].clip(0.0, 1.0)
     df["px"] = 1.0 - df["qx"]
-    last = df.index[-1]
-    df.loc[last, "qx"] = 1.0
     df.loc[last, "px"] = 0.0
 
     # --- Optional: P-spline smoothing of qx via Poisson penalized fit on single-year ages ---
@@ -313,6 +297,9 @@ def make_lifetable(
         )
         qx_ps = np.clip(qx_ps, 0.0, 1.0)
         qx_ps[-1] = 1.0
+        # also cap non-terminal P-spline qx a hair below 1
+        if qx_ps.size > 1:
+            qx_ps[:-1] = np.minimum(qx_ps[:-1], 1.0 - eps)
         df["qx"] = qx_ps
         df["px"] = 1.0 - df["qx"]
         # attach metadata (constant per row, useful for auditing)

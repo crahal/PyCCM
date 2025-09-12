@@ -124,9 +124,9 @@ def load_all_data(data_dir) -> dict:
     """
     data_files = {
         'conteos': os.path.join(data_dir, 'conteos.rds'),
-        'migracion_destino_edad': os.path.join(data_dir, 'migracion_destino_edad.rds'),
-        'migracion_origen_destino': os.path.join(data_dir, 'migracion_origen_destino.rds'),
-        'tasas_especificas': os.path.join(data_dir, 'tasas_especificas.rds')
+#        'migracion_destino_edad': os.path.join(data_dir, 'migracion_destino_edad.rds'),
+#        'migracion_origen_destino': os.path.join(data_dir, 'migracion_origen_destino.rds'),
+#        'tasas_especificas': os.path.join(data_dir, 'tasas_especificas.rds')
     }
 
     for name, path in data_files.items():
