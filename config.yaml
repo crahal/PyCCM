@@ -1,41 +1,41 @@
-# config.yaml (fixed)
+# config.yaml
 
 paths:
   data_dir: "./data"
-  results_dir: "./results"
+  results_dir: "./results/unabridged"
   target_tfr_csv: "./data/target_tfrs.csv"
 
 diagnostics:
   print_target_csv: true
 
 unabridging:
-  enabled: true
+  enabled: true # abridged (5-year ages)
 
 projections:
   start_year: 2018
-  end_year: 2070
-  step_years: 5
+  end_year: 2100
+  step_years: 1 # <-- IMPORTANT: 5-year steps in abridged mode
   death_choices: ["EEVV", "censo_2018", "midpoint"]
   last_observed_year_by_death:
     EEVV: 2023
     censo_2018: 2018
     midpoint: 2018
   period_years: 5
-  flows_latest_year: 2021
+  flows_latest_year: 2024
 
 fertility:
-  default_tfr_target: 1.5
+  default_tfr_target: 1.2
   convergence_years: 50
   smoother:
-    kind: "exp" # "exp" or "logistic"
-    converge_frac: 0.99 # used when kind=="exp"
+    kind: "exp"
+    converge_frac: 0.99
     logistic:
       mid_frac: 0.5
       steepness: null
 
 mortality:
-  use_ma: true # apply centered moving-average on log(mx) before qx construction
-  ma_window: 5 # centered window size (must be odd for symmetry; code permits any int >=1)
+  use_ma: true
+  ma_window: 5
 
 age_bins:
   expected_bins:
@@ -76,7 +76,7 @@ age_bins:
     - "80+"
 
 runs:
-  mode: "no_draws" # "no_draws" | "draws"
+  mode: "no_draws"
   no_draws_tasks:
     - { sample_type: "mid", distribution: null, label: "mid_omissions" }
     - { sample_type: "low", distribution: null, label: "low_omissions" }

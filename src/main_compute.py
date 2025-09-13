@@ -1,13 +1,11 @@
 # src/main_compute.py
-# End-to-end driver with UNABRIDGING flag (default True).
-# If unabridging.enabled == True  -> single-year ages (0..89, 90+) and ANNUAL projections.
-# If unabridging.enabled == False -> five-year ages and QUINQUENNIAL projections.
 
 from __future__ import annotations
 import os
 import sys
 import zlib
 import yaml
+import re
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
@@ -28,36 +26,21 @@ ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 CONFIG_PATH = os.path.join(ROOT_DIR, "config.yaml")
 
 _DEFAULT_CFG = {
-    "paths": {
-        "data_dir": "./data",
-        "results_dir": "./results",
-        "target_tfr_csv": "./data/target_tfrs.csv",
-    },
+    "paths": {"data_dir": "./data", "results_dir": "./results", "target_tfr_csv": "./data/target_tfrs.csv"},
     "diagnostics": {"print_target_csv": True},
     "projections": {
-        "start_year": 2018,
-        "end_year": 2070,
-        "step_years": 5,  # used only when unabridging.enabled == false
+        "start_year": 2018, "end_year": 2070, "step_years": 5,
         "death_choices": ["EEVV", "censo_2018", "midpoint"],
         "last_observed_year_by_death": {"EEVV": 2023, "censo_2018": 2018, "midpoint": 2018},
-        "period_years": 5,  # will be overridden dynamically by UNABR switch
-        "flows_latest_year": 2021,
+        "period_years": 5, "flows_latest_year": 2021,
     },
     "fertility": {
-        "default_tfr_target": 1.5,
-        "convergence_years": 50,
-        "smoother": {
-            "kind": "exp",
-            "converge_frac": 0.99,
-            "logistic": {"mid_frac": 0.5, "steepness": None},
-        },
+        "default_tfr_target": 1.5, "convergence_years": 50,
+        "smoother": {"kind": "exp", "converge_frac": 0.99, "logistic": {"mid_frac": 0.5, "steepness": None}},
     },
     "age_bins": {
-        # used only when unabridging.enabled == false
-        "expected_bins": ["0-4","5-9","10-14","15-19","20-24","25-29","30-34","35-39",
-                          "40-44","45-49","50-54","55-59","60-64","65-69","70-74","75-79","80+"],
-        "order": ["0-4","5-9","10-14","15-19","20-24","25-29","30-34","35-39",
-                  "40-44","45-49","50-54","55-59","60-64","65-69","70-74","75-79","80+"],
+        "expected_bins": ["0-4","5-9","10-14","15-19","20-24","25-29","30-34","35-39","40-44","45-49","50-54","55-59","60-64","65-69","70-74","75-79","80+"],
+        "order":         ["0-4","5-9","10-14","15-19","20-24","25-29","30-34","35-39","40-44","45-49","50-54","55-59","60-64","65-69","70-74","75-79","80+"],
     },
     "mortality": {"use_ma": True, "ma_window": 5},
     "runs": {
@@ -67,15 +50,9 @@ _DEFAULT_CFG = {
             {"sample_type": "low",  "distribution": None, "label": "low_omissions"},
             {"sample_type": "high", "distribution": None, "label": "high_omissions"},
         ],
-        "draws": {
-            "num_draws": 1000,
-            "dist_types": ["uniform", "pert", "beta", "normal"],
-            "label_pattern": "{dist}_draw_{i}",
-        },
+        "draws": {"num_draws": 1000, "dist_types": ["uniform","pert","beta","normal"], "label_pattern": "{dist}_draw_{i}"},
     },
-    # Switch between one-year and five-year pipelines
     "unabridging": {"enabled": True},
-    # filenames fallback if not present in YAML
     "filenames": {"asfr": "asfr.csv", "lt_M": "lt_M_t.csv", "lt_F": "lt_F_t.csv", "lt_T": "lt_T_t.csv"},
 }
 
@@ -85,7 +62,6 @@ def _load_config(path: str) -> dict:
         return _DEFAULT_CFG
     with open(path, "r", encoding="utf-8") as fh:
         cfg_user = yaml.safe_load(fh) or {}
-    # deep merge, 1 level
     cfg = _DEFAULT_CFG.copy()
     for k, v in cfg_user.items():
         if isinstance(v, dict) and isinstance(cfg.get(k), dict):
@@ -117,12 +93,10 @@ DEFAULT_TFR_TARGET = float(FERT["default_tfr_target"])
 CONV_YEARS = int(FERT["convergence_years"])
 SMOOTHER = FERT["smoother"]
 SMOOTH_KIND = SMOOTHER.get("kind", "exp")
-SMOOTH_KW = (
-    {"converge_frac": float(SMOOTHER.get("converge_frac", 0.99))}
-    if SMOOTH_KIND == "exp"
-    else {"mid_frac": float(SMOOTHER["logistic"].get("mid_frac", 0.5)),
-          "steepness": (SMOOTHER["logistic"].get("steepness", None))}
-)
+SMOOTH_KW = ({"converge_frac": float(SMOOTHER.get("converge_frac", 0.99))}
+             if SMOOTH_KIND == "exp"
+             else {"mid_frac": float(SMOOTHER["logistic"].get("mid_frac", 0.5)),
+                   "steepness": (SMOOTHER["logistic"].get("steepness", None))})
 
 FILENAMES = CFG.get("filenames", {})
 LT_NAME_M = FILENAMES.get("lt_M", "lt_M_t.csv")
@@ -137,10 +111,8 @@ def _single_year_bins() -> list[str]:
 def _bin_width(label: str) -> float:
     s = str(label)
     if "-" in s:
-        lo, hi = s.split("-")
-        return float(hi) - float(lo) + 1.0
-    if s.endswith("+"):
-        return 5.0
+        lo, hi = s.split("-"); return float(hi) - float(lo) + 1.0
+    if s.endswith("+"): return 5.0
     return 1.0
 
 def _widths_from_index(idx) -> np.ndarray:
@@ -150,16 +122,13 @@ def _coerce_list(x):
     if isinstance(x, list):
         flat = []
         for it in x:
-            if isinstance(it, list):
-                flat.extend(it)
+            if isinstance(it, list): flat.extend(it)
             elif isinstance(it, str) and (";" in it or "," in it):
                 flat.extend([s.strip() for s in it.replace(",", ";").split(";") if s.strip()])
-            else:
-                flat.append(it)
+            else: flat.append(it)
         return flat
     if isinstance(x, str):
-        if ";" in x or "," in x:
-            return [s.strip() for s in x.replace(",", ";").split(";") if s.strip()]
+        if ";" in x or "," in x: return [s.strip() for s in x.replace(",", ";").split(";") if s.strip()]
         return [x.strip()]
     return _DEFAULT_CFG["age_bins"]["expected_bins"]
 
@@ -167,7 +136,7 @@ UNABR = bool(CFG.get("unabridging", {}).get("enabled", True))
 
 if UNABR:
     EXPECTED_BINS = _single_year_bins()
-    EDAD_ORDER    = EXPECTED_BINS[:]  # single-year order
+    EDAD_ORDER    = EXPECTED_BINS[:]
     STEP_YEARS    = 1
     PERIOD_YEARS  = 1
     print("[pipeline] UNABRIDGED mode: single-year ages & annual projections.")
@@ -179,15 +148,71 @@ else:
     PERIOD_YEARS  = STEP_YEARS
     print(f"[pipeline] ABRIDGED mode: 5-year ages & projections every {STEP_YEARS} years.")
 
+# ------------------------- Target TFR + custom convergence --------------------
+
+def _find_col(df: pd.DataFrame, must_include: list[str]) -> str | None:
+    """Return first column whose lowercase name contains all substrings in must_include."""
+    low = {c.lower(): c for c in df.columns}
+    for lc, orig in low.items():
+        if all(s in lc for s in must_include):
+            return orig
+    return None
+
+def get_target_params(file_path: str) -> tuple[dict, dict]:
+    """
+    Read target_tfrs.csv and return:
+      - targets: dict DPTO_NOMBRE -> Target_TFR
+      - conv_years: dict DPTO_NOMBRE -> custom convergence years (int)
+    The convergence column is detected liberally (e.g., 'convergeance_year', 'convergence_years', etc.).
+    """
+    df = pd.read_csv(file_path)
+    # DPTO name column (expect 'DPTO_NOMBRE')
+    name_col = "DPTO_NOMBRE"
+    if name_col not in df.columns:
+        # try a case-insensitive match
+        cand = _find_col(df, ["dpto", "nombre"])
+        if not cand:
+            raise KeyError("Could not find 'DPTO_NOMBRE' column in target TFR CSV.")
+        name_col = cand
+
+    # Target TFR column
+    tfr_col = "Target_TFR"
+    if tfr_col not in df.columns:
+        cand = _find_col(df, ["tfr"]) or _find_col(df, ["target"])
+        if not cand:
+            raise KeyError("Could not find 'Target_TFR' column in target TFR CSV.")
+        tfr_col = cand
+
+    # Convergence years column (optional)
+    conv_col = _find_col(df, ["converge", "year"])
+    targets = {}
+    conv_years = {}
+
+    for _, r in df.iterrows():
+        dpto = str(r[name_col]).strip()
+        tfr_val = r[tfr_col]
+        try:
+            tfr_f = float(tfr_val)
+            if np.isfinite(tfr_f):
+                targets[dpto] = tfr_f
+        except Exception:
+            pass
+
+        if conv_col is not None and conv_col in df.columns:
+            try:
+                cy = int(float(r[conv_col]))
+                if cy > 0:
+                    conv_years[dpto] = cy
+            except Exception:
+                # ignore badly-formed values; default will apply
+                pass
+
+    return targets, conv_years
+
 # ------------------------------ Helper functions ------------------------------
 
-def get_target_tfrs(file_path: str) -> dict:
-    df = pd.read_csv(file_path)
-    return dict(zip(df["DPTO_NOMBRE"], df["Target_TFR"]))
-
 def _with_suffix(fname: str, suffix: str) -> str:
-    if not suffix:
-        return fname
+    if not suffix: return fname
     base, ext = os.path.splitext(fname)
     return f"{base}{suffix}{ext}"
 
@@ -211,44 +236,29 @@ def _normalize_weights_to(idx, w):
 def _exp_tfr(TFR0: float, target: float, years: int, step: int, converge_frac: float = 0.99) -> float:
     t = max(step, 0)
     gap0 = float(TFR0 - target)
-    if gap0 == 0.0:
-        return float(target)
-    eps = 1e-12
-    q = max(1.0 - converge_frac, eps)
+    if gap0 == 0.0: return float(target)
+    eps = 1e-12; q = max(1.0 - converge_frac, eps)
     kappa = -np.log(q) / max(years, 1)
     return float(target + gap0 * np.exp(-kappa * t))
 
-def _logistic_tfr(TFR0: float, target: float, years: int, step: int,
-                  mid_frac: float = 0.5, steepness: float | None = None) -> float:
-    t = max(step, 0.0)
-    t0 = float(mid_frac) * max(years, 1)
+def _logistic_tfr(TFR0: float, target: float, years: int, step: int, mid_frac: float = 0.5, steepness: float | None = None) -> float:
+    t = max(step, 0.0); t0 = float(mid_frac) * max(years, 1)
     if steepness is None:
         r = 100.0
         steepness = (np.log(r) - np.log(1 + np.exp(-t0))) / max(years - t0, 1e-9)
     s = float(steepness)
-    gap0 = float(TFR0 - target)
-    scale = 1.0 + np.exp(-s * t0)
+    gap0 = float(TFR0 - target); scale = 1.0 + np.exp(-s * t0)
     return float(target + gap0 * (scale / (1.0 + np.exp(s * (t - t0)))))
 
 def _smooth_tfr(TFR0: float, target: float, years: int, step: int, kind: str = "exp", **kwargs) -> float:
-    if kind == "exp":
-        return _exp_tfr(TFR0, target, years, step, **kwargs)
-    elif kind == "logistic":
-        return _logistic_tfr(TFR0, target, years, step, **kwargs)
-    else:
-        raise ValueError(f"Unknown TFR path kind: {kind!r}")
+    if kind == "exp": return _exp_tfr(TFR0, target, years, step, **kwargs)
+    elif kind == "logistic": return _logistic_tfr(TFR0, target, years, step, **kwargs)
+    else: raise ValueError(f"Unknown TFR path kind: {kind!r}")
 
 def fill_missing_age_bins(s: pd.Series) -> pd.Series:
     return s.reindex(EDAD_ORDER, fill_value=0.0)
 
 def _ridx(s_like) -> pd.Series:
-    """
-    Duplicate-safe reindex to EDAD_ORDER:
-      - coerce to Series
-      - normalize index to stripped strings
-      - if duplicate labels exist, aggregate by sum
-      - reindex to EDAD_ORDER and cast to float
-    """
     s = pd.Series(s_like, copy=False)
     s.index = pd.Index(map(str, s.index)).str.strip()
     if s.index.has_duplicates:
@@ -256,7 +266,63 @@ def _ridx(s_like) -> pd.Series:
         s.index = pd.Index(map(str, s.index)).str.strip()
     return s.reindex(EDAD_ORDER, fill_value=0.0).astype(float)
 
-# ------------------------------- Main procedure -------------------------------
+# === abridged-only: collapse 0–1 + 2–4 => 0–4 for defunciones BEFORE omission ===
+
+_AGE_01_PAT = re.compile(r"^\s*0\s*[-–]\s*1\s*$")
+_AGE_24_PAT = re.compile(r"^\s*2\s*[-–]\s*4\s*$")
+
+def _collapse_defunciones_01_24_to_04(df_def: pd.DataFrame) -> pd.DataFrame:
+    """
+    Sum '0-1' and '2-4' into '0-4' per (DPTO_NOMBRE, DPTO_CODIGO, ANO, SEXO, VARIABLE, FUENTE),
+    using the higher OMISION of the two. Aggregate both VALOR and VALOR_withmissing if present.
+    Leave VALOR_corrected as NaN (computed later).
+    """
+    if df_def.empty:
+        return df_def.copy()
+
+    df = df_def.copy()
+    is_01 = df["EDAD"].astype(str).str.match(_AGE_01_PAT)
+    is_24 = df["EDAD"].astype(str).str.match(_AGE_24_PAT)
+    needs_collapse = is_01 | is_24
+    if not needs_collapse.any():
+        return df
+
+    work = df.loc[needs_collapse].copy()
+
+    gkeys = ["DPTO_NOMBRE","DPTO_CODIGO","ANO","SEXO","VARIABLE","FUENTE"]
+    agg_map = {}
+    if "VALOR" in work.columns:
+        agg_map["VALOR"] = "sum"
+    if "VALOR_withmissing" in work.columns:
+        agg_map["VALOR_withmissing"] = "sum"
+
+    work["_OM_NUM"] = pd.to_numeric(work.get("OMISION", np.nan), errors="coerce")
+
+    summed = (
+        work.groupby(gkeys, dropna=False)
+            .agg({**agg_map, "_OM_NUM": "max"})
+            .reset_index()
+    )
+
+    # Build collapsed with EXACT SAME columns as df, default NaN
+    collapsed = pd.DataFrame(columns=df.columns)
+    for k in gkeys:
+        collapsed[k] = summed[k]
+    collapsed["EDAD"] = "0-4"
+
+    if "VALOR" in df.columns and "VALOR" in summed.columns:
+        collapsed["VALOR"] = summed["VALOR"]
+    if "VALOR_withmissing" in df.columns and "VALOR_withmissing" in summed.columns:
+        collapsed["VALOR_withmissing"] = summed["VALOR_withmissing"]
+    if "VALOR_corrected" in df.columns:
+        collapsed["VALOR_corrected"] = np.nan
+    if "OMISION" in df.columns:
+        collapsed["OMISION"] = summed["_OM_NUM"]
+
+    out = pd.concat([df.loc[~needs_collapse], collapsed], ignore_index=True, sort=False)
+    return out
+
+# --------------------------------- main logic ---------------------------------
 
 def main_wrapper(conteos, emi, imi, projection_range, sample_type, distribution=None, draw=None):
     DTPO_list = list(conteos["DPTO_NOMBRE"].unique()) + ["total_nacional"]
@@ -265,43 +331,59 @@ def main_wrapper(conteos, emi, imi, projection_range, sample_type, distribution=
     asfr_weights = {}
     asfr_baseline = {}
 
-    # Target TFR loading/diagnostics
+    # Target TFRs + (new) per-DPTO convergence years from CSV (if present)
     target_tfrs = None
+    target_conv_years = None
     target_csv_path = PATHS["target_tfr_csv"]
     if os.path.exists(target_csv_path):
-        target_tfrs = get_target_tfrs(target_csv_path)
+        targets, conv_years = get_target_params(target_csv_path)
+        target_tfrs = targets
+        target_conv_years = conv_years
 
         def _finite(x):
-            try:
-                return np.isfinite(float(x))
-            except Exception:
-                return False
+            try: return np.isfinite(float(x))
+            except Exception: return False
 
         if PRINT_TARGET_CSV:
             dptos_no_nat = [d for d in DTPO_list if d != "total_nacional"]
-            missing = [d for d in dptos_no_nat if not (d in target_tfrs and _finite(target_tfrs[d]))]
+            missing = [d for d in dptos_no_nat if not (d in targets and _finite(targets[d]))]
             if len(missing) == 0:
                 print("target_csv present: per-DPTO targets available for all DPTOs.")
             else:
                 print(f"target_csv present: missing/invalid targets for {len(missing)} DPTO(s); defaulting to global target where needed.")
-            if ("total_nacional" in target_tfrs) and _finite(target_tfrs["total_nacional"]):
+            if ("total_nacional" in targets) and _finite(targets["total_nacional"]):
                 print("target_csv includes a finite total_nacional target.")
             else:
                 print("target_csv present but no finite total_nacional target; aggregating national target from DPTO targets.")
+
+            if target_conv_years:
+                print(f"target_csv includes custom convergence years for {len(target_conv_years)} DPTO(s); "
+                      f"default (YAML) will apply elsewhere.")
+            else:
+                print("target_csv includes no custom convergence years; YAML default will apply to all units.")
     else:
         if PRINT_TARGET_CSV:
-            print("no target_csv file, defaulting to global target")
+            print("no target_csv file, defaulting to global target & YAML convergence years")
 
     def _is_finite_number(x) -> bool:
-        try:
-            return np.isfinite(float(x))
-        except Exception:
-            return False
+        try: return np.isfinite(float(x))
+        except Exception: return False
 
     def _dept_target_or_default(dpto_name: str) -> float:
         if (target_tfrs is not None) and (dpto_name in target_tfrs) and _is_finite_number(target_tfrs[dpto_name]):
             return float(target_tfrs[dpto_name])
         return float(DEFAULT_TFR_TARGET)
+
+    def _conv_years_for_unit(dpto_name: str) -> int:
+        """Per-DPTO convergence years from CSV, else YAML default."""
+        if (target_conv_years is not None) and (dpto_name in target_conv_years):
+            try:
+                cy = int(target_conv_years[dpto_name])
+                if cy > 0:
+                    return cy
+            except Exception:
+                pass
+        return CONV_YEARS
 
     def _national_weighted_target(year: int, death_choice: str, asfr_age_index) -> float:
         dptos_no_nat = [d for d in DTPO_list if d != "total_nacional"]
@@ -337,27 +419,20 @@ def main_wrapper(conteos, emi, imi, projection_range, sample_type, distribution=
         return float(num)
 
     def _target_for_this_unit(dpto_name: str, year: int, death_choice: str, asfr_age_index) -> float:
-        if target_tfrs is None:
-            return float(DEFAULT_TFR_TARGET)
-        if dpto_name != "total_nacional":
-            return _dept_target_or_default(dpto_name)
+        if target_tfrs is None: return float(DEFAULT_TFR_TARGET)
+        if dpto_name != "total_nacional": return _dept_target_or_default(dpto_name)
         if ("total_nacional" in target_tfrs) and _is_finite_number(target_tfrs["total_nacional"]):
             return float(target_tfrs["total_nacional"])
         return _national_weighted_target(year, death_choice, asfr_age_index)
 
     # Projection loop
     for death_choice in DEATH_CHOICES:
-        proj_F = pd.DataFrame()
-        proj_M = pd.DataFrame()
-        proj_T = pd.DataFrame()
-
-        # keep the last available LTs to reuse when we don't rebuild
-        lt_M_t = None
-        lt_F_t = None
-        lt_T_t = None
+        proj_F = pd.DataFrame(); proj_M = pd.DataFrame(); proj_T = pd.DataFrame()
+        lt_M_t = None; lt_F_t = None; lt_T_t = None
 
         for year in tqdm(range(START_YEAR, END_YEAR + 1, STEP_YEARS)):
             for DPTO in (list(conteos["DPTO_NOMBRE"].unique()) + ["total_nacional"]):
+                # print(DPTO, year, death_choice, sample_type, distribution, draw)
                 if DPTO != "total_nacional":
                     conteos_all = conteos[conteos["DPTO_NOMBRE"] == DPTO]
                 else:
@@ -457,6 +532,9 @@ def main_wrapper(conteos, emi, imi, projection_range, sample_type, distribution=
                     rhs_F = _ridx(rhs_F).rename("rhs")
                     ratio_F = lhs_F.div(rhs_F.replace(0, np.nan))
 
+                ratio_M = ratio_M.replace([np.inf, -np.inf], np.nan).fillna(1.0)
+                ratio_F = ratio_F.replace([np.inf, -np.inf], np.nan).fillna(1.0)
+
                 # --- migration: latest available flows, scaled to the projection period
                 flows_year = min(year, FLOWS_LATEST_YEAR)
                 imi_age_M = (imi.loc[(imi["ANO"] == flows_year) & (imi["SEXO"] == 1)]
@@ -464,13 +542,17 @@ def main_wrapper(conteos, emi, imi, projection_range, sample_type, distribution=
                 emi_age_M = (emi.loc[(emi["ANO"] == flows_year) & (emi["SEXO"] == 1)]
                              .groupby("EDAD")["VALOR"].sum().reindex(edad_order, fill_value=0))
                 net_M_annual = ratio_M * (imi_age_M - emi_age_M)
-                net_M = PERIOD_YEARS * net_M_annual
 
                 imi_age_F = (imi.loc[(imi["ANO"] == flows_year) & (imi["SEXO"] == 2)]
                              .groupby("EDAD")["VALOR"].sum().reindex(edad_order, fill_value=0))
                 emi_age_F = (emi.loc[(emi["ANO"] == flows_year) & (emi["SEXO"] == 2)]
                              .groupby("EDAD")["VALOR"].sum().reindex(edad_order, fill_value=0))
                 net_F_annual = ratio_F * (imi_age_F - emi_age_F)
+
+                net_M_annual = net_M_annual.fillna(0.0)
+                net_F_annual = net_F_annual.fillna(0.0)
+
+                net_M = PERIOD_YEARS * net_M_annual
                 net_F = PERIOD_YEARS * net_F_annual
 
                 # add half-period migration to exposures before rates; keep exposures > 0
@@ -481,7 +563,6 @@ def main_wrapper(conteos, emi, imi, projection_range, sample_type, distribution=
                     conteos_all_F_p_t_updated = (_ridx(conteos_all_F_p_t_updated) + (net_F / 2.0)).clip(lower=1e-9)
 
                 # ------------------- Life tables: build & save IFF deaths exist for that source-year
-                # conditions to rebuild for this year
                 deaths_sum = float(conteos_all_M_d_t.sum() + conteos_all_F_d_t.sum())
                 rebuild_lt_this_year = (
                     (death_choice == "EEVV" and (year <= LAST_OBS_YEAR["EEVV"]) and deaths_sum > 0.0) or
@@ -567,12 +648,19 @@ def main_wrapper(conteos, emi, imi, projection_range, sample_type, distribution=
                     base = asfr_baseline[key]
                     step = year - base["year"]
 
+                    # ---- NEW: per-DPTO convergence years
+                    conv_years_local = _conv_years_for_unit(DPTO)
+
                     TFR_TARGET_LOCAL = _target_for_this_unit(DPTO, year, death_choice, asfr_df.index)
-                    TFR_t = _smooth_tfr(base["TFR0"], TFR_TARGET_LOCAL, CONV_YEARS, step, kind=SMOOTH_KIND, **SMOOTH_KW)
+                    TFR_t = _smooth_tfr(
+                        base["TFR0"], TFR_TARGET_LOCAL,
+                        conv_years_local,  # <-- use DPTO-specific value or YAML default
+                        step,
+                        kind=SMOOTH_KIND, **SMOOTH_KW
+                    )
 
                     proj_df = asfr_df.copy()
-                    proj_df["population"] = np.nan
-                    proj_df["births"] = np.nan
+                    proj_df["population"] = np.nan; proj_df["births"] = np.nan
                     w_norm = _normalize_weights_to(proj_df.index, w)
                     proj_df["asfr"] = (w_norm * TFR_t).astype(float)
 
@@ -661,7 +749,12 @@ if __name__ == "__main__":
         for var in ["defunciones", "nacimientos", "poblacion_total"]:
             mask = df["VARIABLE"] == var
             df_var = df.loc[mask].copy()
+
+            if (not UNABR) and (var == "defunciones"):
+                df_var = _collapse_defunciones_01_24_to_04(df_var)
+
             df_var = allocate_and_drop_missing_age(df_var)
+
             df_var.loc[:, "VALOR_corrected"] = correct_valor_for_omission(
                 df_var, sample_type, distribution=dist, valor_col="VALOR_withmissing"
             )
