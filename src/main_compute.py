@@ -26,7 +26,12 @@ ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 CONFIG_PATH = os.path.join(ROOT_DIR, "config.yaml")
 
 _DEFAULT_CFG = {
-    "paths": {"data_dir": "./data", "results_dir": "./results", "target_tfr_csv": "./data/target_tfrs.csv"},
+    "paths": {
+        "data_dir": "./data",
+        "results_dir": "./results",
+        "target_tfr_csv": "./data/target_tfrs.csv",
+        "midpoints_csv": "./data/midpoints.csv",  # NEW
+    },
     "diagnostics": {"print_target_csv": True},
     "projections": {
         "start_year": 2018, "end_year": 2070, "step_years": 5,
@@ -37,6 +42,9 @@ _DEFAULT_CFG = {
     "fertility": {
         "default_tfr_target": 1.5, "convergence_years": 50,
         "smoother": {"kind": "exp", "converge_frac": 0.99, "logistic": {"mid_frac": 0.5, "steepness": None}},
+    },
+    "midpoints": {  # NEW: default EEVV weight if CSV missing / DPTO not found
+        "default_eevv_weight": 0.5
     },
     "age_bins": {
         "expected_bins": ["0-4","5-9","10-14","15-19","20-24","25-29","30-34","35-39","40-44","45-49","50-54","55-59","60-64","65-69","70-74","75-79","80+"],
@@ -77,6 +85,7 @@ PATHS = {
     "data_dir": _resolve(CFG["paths"]["data_dir"]),
     "results_dir": _resolve(CFG["paths"]["results_dir"]),
     "target_tfr_csv": _resolve(CFG["paths"]["target_tfr_csv"]),
+    "midpoints_csv": _resolve(CFG["paths"].get("midpoints_csv", "./data/midpoints.csv")),  # NEW
 }
 
 PRINT_TARGET_CSV = bool(CFG.get("diagnostics", {}).get("print_target_csv", True))
@@ -97,6 +106,9 @@ SMOOTH_KW = ({"converge_frac": float(SMOOTHER.get("converge_frac", 0.99))}
              if SMOOTH_KIND == "exp"
              else {"mid_frac": float(SMOOTHER["logistic"].get("mid_frac", 0.5)),
                    "steepness": (SMOOTHER["logistic"].get("steepness", None))})
+
+# NEW: default EEVV weight if CSV missing / DPTO not present
+DEFAULT_MIDPOINT = float(CFG.get("midpoints", {}).get("default_eevv_weight", 0.5))
 
 FILENAMES = CFG.get("filenames", {})
 LT_NAME_M = FILENAMES.get("lt_M", "lt_M_t.csv")
@@ -169,7 +181,6 @@ def get_target_params(file_path: str) -> tuple[dict, dict]:
     # DPTO name column (expect 'DPTO_NOMBRE')
     name_col = "DPTO_NOMBRE"
     if name_col not in df.columns:
-        # try a case-insensitive match
         cand = _find_col(df, ["dpto", "nombre"])
         if not cand:
             raise KeyError("Could not find 'DPTO_NOMBRE' column in target TFR CSV.")
@@ -204,10 +215,54 @@ def get_target_params(file_path: str) -> tuple[dict, dict]:
                 if cy > 0:
                     conv_years[dpto] = cy
             except Exception:
-                # ignore badly-formed values; default will apply
                 pass
 
     return targets, conv_years
+
+# ------------------------ Midpoint (EEVV weight) loader -----------------------
+
+def get_midpoint_weights(file_path: str) -> dict:
+    """
+    Read midpoints CSV and return dict DPTO_NOMBRE -> weight_eevv in [0,1].
+    Column detection is liberal:
+      - 'DPTO_NOMBRE' for department (case-insensitive fallback allowed)
+      - value column containing 'mid' (e.g., 'midpoint') OR both 'eevv' and 'weight'
+    """
+    if not os.path.exists(file_path):
+        return {}
+
+    df = pd.read_csv(file_path)
+
+    # Name column
+    name_col = "DPTO_NOMBRE"
+    if name_col not in df.columns:
+        cand = _find_col(df, ["dpto", "nombre"]) or _find_col(df, ["depart"])
+        if not cand:
+            raise KeyError("Could not find 'DPTO_NOMBRE' column in midpoints CSV.")
+        name_col = cand
+
+    # Value column
+    val_col = None
+    # prefer something with "mid"
+    val_col = _find_col(df, ["mid"]) or _find_col(df, ["eevv", "weight"]) or _find_col(df, ["weight"])
+    if val_col is None:
+        # last resort: any numeric column that's not the name
+        numeric_cols = [c for c in df.columns if c != name_col and pd.api.types.is_numeric_dtype(df[c])]
+        if numeric_cols:
+            val_col = numeric_cols[0]
+        else:
+            raise KeyError("Could not infer midpoint value column in midpoints CSV.")
+
+    out = {}
+    for _, r in df.iterrows():
+        dpto = str(r[name_col]).strip()
+        try:
+            v = float(r[val_col])
+            if np.isfinite(v):
+                out[dpto] = float(np.clip(v, 0.0, 1.0))
+        except Exception:
+            pass
+    return out
 
 # ------------------------------ Helper functions ------------------------------
 
@@ -331,7 +386,7 @@ def main_wrapper(conteos, emi, imi, projection_range, sample_type, distribution=
     asfr_weights = {}
     asfr_baseline = {}
 
-    # Target TFRs + (new) per-DPTO convergence years from CSV (if present)
+    # Target TFRs + per-DPTO convergence years
     target_tfrs = None
     target_conv_years = None
     target_csv_path = PATHS["target_tfr_csv"]
@@ -357,13 +412,31 @@ def main_wrapper(conteos, emi, imi, projection_range, sample_type, distribution=
                 print("target_csv present but no finite total_nacional target; aggregating national target from DPTO targets.")
 
             if target_conv_years:
-                print(f"target_csv includes custom convergence years for {len(target_conv_years)} DPTO(s); "
-                      f"default (YAML) will apply elsewhere.")
+                print(f"target_csv includes custom convergence years for {len(target_conv_years)} DPTO(s); default (YAML) will apply elsewhere.")
             else:
                 print("target_csv includes no custom convergence years; YAML default will apply to all units.")
     else:
         if PRINT_TARGET_CSV:
             print("no target_csv file, defaulting to global target & YAML convergence years")
+
+    # Midpoint (EEVV weight) per DPTO
+    mid_csv = PATHS["midpoints_csv"]
+    midpoint_weights = {}
+    if os.path.exists(mid_csv):
+        try:
+            midpoint_weights = get_midpoint_weights(mid_csv)
+            print(f"midpoints_csv present: {len(midpoint_weights)} DPTO weights loaded; default {DEFAULT_MIDPOINT} used for others.")
+        except Exception as e:
+            print(f"Warning: failed to read midpoints_csv ({e}); default {DEFAULT_MIDPOINT} will be used for all DPTOs.")
+            midpoint_weights = {}
+    else:
+        print(f"no midpoints_csv found; using default EEVV weight = {DEFAULT_MIDPOINT} for all DPTOs.")
+
+    def _midpoint_for(dpto_name: str) -> float:
+        try:
+            return float(midpoint_weights.get(dpto_name, DEFAULT_MIDPOINT))
+        except Exception:
+            return DEFAULT_MIDPOINT
 
     def _is_finite_number(x) -> bool:
         try: return np.isfinite(float(x))
@@ -460,17 +533,31 @@ def main_wrapper(conteos, emi, imi, projection_range, sample_type, distribution=
                     year_for_deaths = 2018
                     conteos_all_M = conteos_all_M[conteos_all_M["ANO"] == 2018]
                     conteos_all_F = conteos_all_F[conteos_all_F["ANO"] == 2018]
+
+                    # Merge deaths from both sources at row (DPTO, EDAD, etc.) level
                     M_d1 = conteos_all_M[(conteos_all_M["VARIABLE"] == "defunciones") & (conteos_all_M["FUENTE"] == "EEVV")]
                     F_d1 = conteos_all_F[(conteos_all_F["VARIABLE"] == "defunciones") & (conteos_all_F["FUENTE"] == "EEVV")]
                     M_d2 = conteos_all_M[(conteos_all_M["VARIABLE"] == "defunciones") & (conteos_all_M["FUENTE"] == "censo_2018")]
                     F_d2 = conteos_all_F[(conteos_all_F["VARIABLE"] == "defunciones") & (conteos_all_F["FUENTE"] == "censo_2018")]
-                    conteos_all_M_d = pd.merge(M_d1, M_d2,
-                                               on=["DPTO_NOMBRE","SEXO","EDAD","ANO","VARIABLE"], suffixes=("_EEVV","_censo"))
-                    conteos_all_M_d["VALOR_corrected"] = 0.5 * (conteos_all_M_d["VALOR_corrected_EEVV"] + conteos_all_M_d["VALOR_corrected_censo"])
+
+                    merge_keys = ["DPTO_NOMBRE","SEXO","EDAD","ANO","VARIABLE"]
+
+                    conteos_all_M_d = pd.merge(M_d1, M_d2, on=merge_keys, suffixes=("_EEVV","_censo"))
+                    w_M = conteos_all_M_d["DPTO_NOMBRE"].map(_midpoint_for).astype(float)
+                    w_M = w_M.clip(0.0, 1.0).fillna(DEFAULT_MIDPOINT)
+                    conteos_all_M_d["VALOR_corrected"] = (
+                        w_M * conteos_all_M_d["VALOR_corrected_EEVV"]
+                        + (1.0 - w_M) * conteos_all_M_d["VALOR_corrected_censo"]
+                    )
                     conteos_all_M_d = conteos_all_M_d[["DPTO_NOMBRE","SEXO","EDAD","ANO","VARIABLE","VALOR_corrected"]]
-                    conteos_all_F_d = pd.merge(F_d1, F_d2,
-                                               on=["DPTO_NOMBRE","SEXO","EDAD","ANO","VARIABLE"], suffixes=("_EEVV","_censo"))
-                    conteos_all_F_d["VALOR_corrected"] = 0.5 * (conteos_all_F_d["VALOR_corrected_EEVV"] + conteos_all_F_d["VALOR_corrected_censo"])
+
+                    conteos_all_F_d = pd.merge(F_d1, F_d2, on=merge_keys, suffixes=("_EEVV","_censo"))
+                    w_F = conteos_all_F_d["DPTO_NOMBRE"].map(_midpoint_for).astype(float)
+                    w_F = w_F.clip(0.0, 1.0).fillna(DEFAULT_MIDPOINT)
+                    conteos_all_F_d["VALOR_corrected"] = (
+                        w_F * conteos_all_F_d["VALOR_corrected_EEVV"]
+                        + (1.0 - w_F) * conteos_all_F_d["VALOR_corrected_censo"]
+                    )
                     conteos_all_F_d = conteos_all_F_d[["DPTO_NOMBRE","SEXO","EDAD","ANO","VARIABLE","VALOR_corrected"]]
                 else:
                     raise ValueError(f"Unknown death_choice: {death_choice}")
@@ -648,13 +735,13 @@ def main_wrapper(conteos, emi, imi, projection_range, sample_type, distribution=
                     base = asfr_baseline[key]
                     step = year - base["year"]
 
-                    # ---- NEW: per-DPTO convergence years
+                    # per-DPTO convergence years
                     conv_years_local = _conv_years_for_unit(DPTO)
 
                     TFR_TARGET_LOCAL = _target_for_this_unit(DPTO, year, death_choice, asfr_df.index)
                     TFR_t = _smooth_tfr(
                         base["TFR0"], TFR_TARGET_LOCAL,
-                        conv_years_local,  # <-- use DPTO-specific value or YAML default
+                        conv_years_local,
                         step,
                         kind=SMOOTH_KIND, **SMOOTH_KW
                     )
