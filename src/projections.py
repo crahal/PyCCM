@@ -4,8 +4,15 @@ import re
 import numpy as np
 import pandas as pd
 
-def save_projections(proj_F, proj_M, proj_T, sample_type, distribution, suffix, death_choice, year):
-    base_proj_path = os.path.join("..", "results", "projections")
+def save_projections(
+    proj_F, proj_M, proj_T,
+    sample_type, distribution, suffix, death_choice, year,
+    results_dir  # <- REQUIRED: pass PATHS["results_dir"]
+):
+    """
+    Save the three age-structure DataFrames to <results_dir>/projections/...
+    """
+    base_proj_path = os.path.join(results_dir, "projections")
     for df_struct, key in [
         (proj_F, "age_structures_df_F"),
         (proj_M, "age_structures_df_M"),
@@ -17,8 +24,16 @@ def save_projections(proj_F, proj_M, proj_T, sample_type, distribution, suffix, 
         os.makedirs(out_path, exist_ok=True)
         df_struct.to_csv(os.path.join(out_path, f"{key}{suffix}{death_choice}.csv"), index=False)
 
-def save_LL(L_MM, L_MF, L_FF, death_choice, DPTO, sample_type, distribution, suffix, year):
-    base_proj_path = os.path.join("..", "results", "projections", death_choice, DPTO)
+
+def save_LL(
+    L_MM, L_MF, L_FF,
+    death_choice, DPTO, sample_type, distribution, suffix, year,
+    results_dir  # <- REQUIRED: pass PATHS["results_dir"]
+):
+    """
+    Save the Leslie submatrices to <results_dir>/projections/<death_choice>/<DPTO>/...
+    """
+    base_proj_path = os.path.join(results_dir, "projections", death_choice, DPTO)
     for label, mat in [("L_MM", L_MM), ("L_MF", L_MF), ("L_FF", L_FF)]:
         out_path = os.path.join(base_proj_path, sample_type)
         if distribution:
@@ -26,14 +41,17 @@ def save_LL(L_MM, L_MF, L_FF, death_choice, DPTO, sample_type, distribution, suf
         os.makedirs(out_path, exist_ok=True)
         pd.DataFrame(mat).to_csv(os.path.join(out_path, f"{label}{suffix}{year}.csv"), index=False)
 
+
 def _s_open_from_ex(step: float, e: float) -> float:
     if not np.isfinite(e) or e <= 0:
         return 0.0
     return float(np.clip(np.exp(-step / e), 0.0, 1.0))
 
+
 def _hazard_from_survival(s: float, step: float) -> float:
     s = float(np.clip(s, 1e-12, 1.0))
     return -np.log(s) / step
+
 
 def _format_age_labels_from_lifetable_index(ages: np.ndarray, step: int) -> list[str]:
     ages = np.asarray(ages, int)
@@ -50,6 +68,7 @@ def _format_age_labels_from_lifetable_index(ages: np.ndarray, step: int) -> list
         else:
             labels.append(f"{a}+")
     return labels
+
 
 def make_projections(
     net_F, net_M,
@@ -69,6 +88,15 @@ def make_projections(
     mort_improv_F: float = 0.015,
     mort_improv_M: float = 0.015
 ):
+    """
+    Construct Leslie submatrices (FF, MF, MM) and project one step forward, returning:
+      - L_MM, L_MF, L_FF
+      - age_structures_df_M, age_structures_df_F, age_structures_df_T
+
+    Notes:
+      - Fertility columns begin at fert_start_idx and span len(asfr_2018).
+      - Survival is derived from life tables with optional trend improvements.
+    """
     k = n + 1
     columns = [f"t+{i}" for i in range(X + 1)]
 

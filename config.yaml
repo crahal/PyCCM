@@ -1,6 +1,7 @@
+# config.yaml
 paths:
   data_dir: "./data"
-  results_dir: "./results/unabridged"
+  results_dir: "./results_abridged"
   target_tfr_csv: "./data/target_tfrs.csv"
   midpoints_csv: "./data/midpoints.csv" # NEW: optional file with per-DPTO EEVV weights
 
@@ -8,12 +9,12 @@ diagnostics:
   print_target_csv: true
 
 unabridging:
-  enabled: true # abridged (5-year ages)
+  enabled: false # abridged (5-year ages)
 
 projections:
   start_year: 2018
   end_year: 2100
-  step_years: 1
+  step_years: 5
   death_choices: ["EEVV", "censo_2018", "midpoint"]
   last_observed_year_by_death:
     EEVV: 2023

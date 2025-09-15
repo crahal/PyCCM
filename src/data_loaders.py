@@ -1,4 +1,6 @@
+# src/data_loaders.py
 import os
+import yaml
 import pyreadr
 import pandas as pd
 import numpy as np
@@ -7,12 +9,85 @@ import numpy as np
 def _get_base_dir():
     return os.path.dirname(os.path.abspath(__file__))
 
+def return_default_config():
+    return {
+        "paths": {
+            "data_dir": "./data",
+            "results_dir": "./results",
+            "target_tfr_csv": "./data/target_tfrs.csv",
+            "midpoints_csv": "./data/midpoints.csv",  # NEW
+        },
+        "diagnostics": {"print_target_csv": True},
+        "projections": {
+            "start_year": 2018, "end_year": 2070, "step_years": 5,
+            "death_choices": ["EEVV", "censo_2018", "midpoint"],
+            "last_observed_year_by_death": {"EEVV": 2023, "censo_2018": 2018, "midpoint": 2018},
+            "period_years": 5, "flows_latest_year": 2021,
+        },
+        "fertility": {
+            "default_tfr_target": 1.5, "convergence_years": 50,
+            "smoother": {"kind": "exp", "converge_frac": 0.99, "logistic": {"mid_frac": 0.5, "steepness": None}},
+        },
+        "midpoints": {  # NEW: default EEVV weight if CSV missing / DPTO not found
+            "default_eevv_weight": 0.5
+        },
+        "age_bins": {
+            "expected_bins": ["0-4","5-9","10-14","15-19","20-24","25-29","30-34","35-39","40-44","45-49","50-54","55-59","60-64","65-69","70-74","75-79","80+"],
+            "order":         ["0-4","5-9","10-14","15-19","20-24","25-29","30-34","35-39","40-44","45-49","50-54","55-59","60-64","65-69","70-74","75-79","80+"],
+        },
+        "mortality": {"use_ma": True, "ma_window": 5},
+        "runs": {
+            "mode": "no_draws",
+            "no_draws_tasks": [
+                {"sample_type": "mid",  "distribution": None, "label": "mid_omissions"},
+                {"sample_type": "low",  "distribution": None, "label": "low_omissions"},
+                {"sample_type": "high", "distribution": None, "label": "high_omissions"},
+            ],
+            "draws": {"num_draws": 1000, "dist_types": ["uniform","pert","beta","normal"], "label_pattern": "{dist}_draw_{i}"},
+        },
+        "unabridging": {"enabled": True},
+        "filenames": {"asfr": "asfr.csv", "lt_M": "lt_M_t.csv", "lt_F": "lt_F_t.csv", "lt_T": "lt_T_t.csv"},
+    }
+
+def _resolve(ROOT_DIR, p): return os.path.abspath(os.path.join(ROOT_DIR, p))
+
+def _load_config(ROOT_DIR: str, path: str) -> dict:
+    """
+    Load YAML config if present; otherwise use defaults.
+    Returns (cfg, PATHS) where
+      - cfg merges user YAML over defaults
+      - PATHS resolves relevant file-system paths relative to ROOT_DIR
+    """
+    if not os.path.exists(path):
+        print(f"[config] No config file at {path}; using built-in defaults.")
+        return return_default_config(), {
+            "data_dir": _resolve(ROOT_DIR, "./data"),
+            "results_dir": _resolve(ROOT_DIR, "./results"),
+            "target_tfr_csv": _resolve(ROOT_DIR, "./data/target_tfrs.csv"),
+            "midpoints_csv": _resolve(ROOT_DIR, "./data/midpoints.csv"),
+        }
+    with open(path, "r", encoding="utf-8") as fh:
+        cfg_user = yaml.safe_load(fh) or {}
+    cfg = return_default_config().copy()
+    for k, v in cfg_user.items():
+        if isinstance(v, dict) and isinstance(cfg.get(k), dict):
+            d = cfg[k].copy(); d.update(v); cfg[k] = d
+        else:
+            cfg[k] = v
+    PATHS = {
+        "data_dir": _resolve(ROOT_DIR, cfg["paths"]["data_dir"]),
+        "results_dir": _resolve(ROOT_DIR, cfg["paths"]["results_dir"]),
+        "target_tfr_csv": _resolve(ROOT_DIR, cfg["paths"]["target_tfr_csv"]),
+        "midpoints_csv": _resolve(ROOT_DIR, cfg["paths"].get("midpoints_csv", "./data/midpoints.csv"))
+    }
+    return cfg, PATHS
+
 
 def allocate_and_drop_missing_age(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Within each (DPTO_NOMBRE, SEXO, FUENTE) group,
-    redistribute the total VALOR of missing-EDAD rows across observed ages,
-    then drop all rows with missing EDAD.
+    Within each (DPTO_NOMBRE, SEXO, FUENTE, ANO, VARIABLE) group,
+    redistribute the total VALOR of missing-EDAD rows across observed ages
+    in proportion to observed VALOR, then drop missing-EDAD rows.
     """
     df = df.copy()
     grouping = ['DPTO_NOMBRE', 'SEXO', 'FUENTE', 'ANO', 'VARIABLE']
@@ -24,9 +99,7 @@ def allocate_and_drop_missing_age(df: pd.DataFrame) -> pd.DataFrame:
         obs  = ~miss
         M = grp.loc[miss, 'VALOR'].sum()
         S = grp.loc[obs,  'VALOR'].sum()
-#        print(M, keys, grp)
         if M > 0 and S > 0:
-            # fractional weights on observed ages
             weights = grp.loc[obs, 'VALOR'] / S
             df.loc[idx[obs], 'VALOR_withmissing'] += M * weights
     # 2) drop all rows with missing EDAD
@@ -88,22 +161,13 @@ def get_fertility():
                     asfr_series.append(series)
                     tfr_values.append(5 * series.sum())
 
-        # Concatenate series for this distribution
         if asfr_series:
             df_dist = pd.concat(asfr_series, axis=1)
             df_list.append(df_dist)
-        # Store TFR values (even if empty)
         tfr_dict[dist] = tfr_values
 
-    # Concatenate across distributions
-    if df_list:
-        stacked_df_all = pd.concat(df_list, axis=1)
-    else:
-        stacked_df_all = pd.DataFrame()
-
-    # Build TFR DataFrame
+    stacked_df_all = pd.concat(df_list, axis=1) if df_list else pd.DataFrame()
     tfr_df = pd.DataFrame({dist: pd.Series(vals) for dist, vals in tfr_dict.items()})
-
     return stacked_df_all, tfr_df
 
 
@@ -124,9 +188,6 @@ def load_all_data(data_dir) -> dict:
     """
     data_files = {
         'conteos': os.path.join(data_dir, 'conteos.rds'),
-#        'migracion_destino_edad': os.path.join(data_dir, 'migracion_destino_edad.rds'),
-#        'migracion_origen_destino': os.path.join(data_dir, 'migracion_origen_destino.rds'),
-#        'tasas_especificas': os.path.join(data_dir, 'tasas_especificas.rds')
     }
 
     for name, path in data_files.items():
@@ -160,11 +221,9 @@ def correct_valor_for_omission(
     V   = df[valor_col]
     eps = pd.Series(0.0, index=df.index)
 
-    # mask of rows with an OMISION level
     valid = df[omision_col].notna()
     levels = df.loc[valid, omision_col].astype(int)
 
-    # 2) deterministic case: low / mid / high
     if distribution is None:
         if sample_type == 'low':
             eps_vals = levels.map(lambda i: omission_ranges[i][0])
@@ -176,10 +235,8 @@ def correct_valor_for_omission(
             raise ValueError("sample_type must be 'low', 'mid', or 'high'")
         eps.loc[valid] = eps_vals
 
-    # 3) stochastic case: one draw per row
     else:
         dist = distribution.lower()
-        # build parameter arrays
         a = levels.map(lambda i: omission_ranges[i][0]).to_numpy()
         b = levels.map(lambda i: omission_ranges[i][1]).to_numpy()
         m = levels.map(lambda i: midpoints[i]).to_numpy()
@@ -199,7 +256,6 @@ def correct_valor_for_omission(
         elif dist == 'normal':
             sigma = (b - a) / 6
             draws = np.random.normal(loc=m, scale=sigma, size=k)
-            # truncate to [a,b]
             mask_bad = (draws < a) | (draws > b)
             while mask_bad.any():
                 draws[mask_bad] = np.random.normal(
@@ -215,5 +271,4 @@ def correct_valor_for_omission(
 
         eps.loc[valid] = draws
 
-    # 4) Return corrected VALOR
     return V * (1.0 + eps)
