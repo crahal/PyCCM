@@ -4,13 +4,15 @@ paths:
   data_dir: "./data"
   results_dir: "./results_unabridged"
   target_tfr_csv: "./data/target_tfrs.csv"
-  midpoints_csv: "./data/midpoints.csv" # optional file with per-DPTO EEVV weights
+  midpoints_csv: "./data/midpoints.csv"
+  mortality_improvements_csv: "./data/mortality_improvements.csv" # <-- NEW & USED
 
 diagnostics:
   print_target_csv: true
+  mortality_improvements_debug: true # optional: prints a few factors each year
 
 unabridging:
-  enabled: true # unabridged (1-year ages)
+  enabled: true
 
 projections:
   start_year: 2018
@@ -40,52 +42,56 @@ midpoints:
 mortality:
   use_ma: true
   ma_window: 5
-  improvement_total: 0.10 # total proportional reduction in hazards by long run (e.g., 0.10 = 10%)
-  convergence_years: 50 # approximate horizon for convergence to ~target improvement
+  improvement_total: 0.10 # default if DPTO missing in CSV
+  convergence_years: 50
   smoother:
     kind: "exp" # "exp" or "logistic"
-    converge_frac: 0.99 # only used for kind="exp"; S(convergence_years)=converge_frac
-    logistic: # used for kind="logistic"
-      mid_frac: 0.5 # inflection at mid_frac * convergence_years
-      steepness: null # if null, auto-calibrate so S(convergence_years) ≈ 0.99
+    converge_frac: 0.99
+    logistic:
+      mid_frac: 0.5
+      steepness: null
 
 age_bins:
   expected_bins:
-    - "0-4"
-    - "5-9"
-    - "10-14"
-    - "15-19"
-    - "20-24"
-    - "25-29"
-    - "30-34"
-    - "35-39"
-    - "40-44"
-    - "45-49"
-    - "50-54"
-    - "55-59"
-    - "60-64"
-    - "65-69"
-    - "70-74"
-    - "75-79"
-    - "80+"
+    [
+      "0-4",
+      "5-9",
+      "10-14",
+      "15-19",
+      "20-24",
+      "25-29",
+      "30-34",
+      "35-39",
+      "40-44",
+      "45-49",
+      "50-54",
+      "55-59",
+      "60-64",
+      "65-69",
+      "70-74",
+      "75-79",
+      "80+",
+    ]
   order:
-    - "0-4"
-    - "5-9"
-    - "10-14"
-    - "15-19"
-    - "20-24"
-    - "25-29"
-    - "30-34"
-    - "35-39"
-    - "40-44"
-    - "45-49"
-    - "50-54"
-    - "55-59"
-    - "60-64"
-    - "65-69"
-    - "70-74"
-    - "75-79"
-    - "80+"
+    [
+      "0-4",
+      "5-9",
+      "10-14",
+      "15-19",
+      "20-24",
+      "25-29",
+      "30-34",
+      "35-39",
+      "40-44",
+      "45-49",
+      "50-54",
+      "55-59",
+      "60-64",
+      "65-69",
+      "70-74",
+      "75-79",
+      "80+",
+    ]
 
 runs:
   mode: "no_draws"
