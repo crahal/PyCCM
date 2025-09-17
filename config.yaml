@@ -1,31 +1,32 @@
 # config.yaml
+
 paths:
   data_dir: "./data"
-  results_dir: "./results_abridged"
+  results_dir: "./results_unabridged"
   target_tfr_csv: "./data/target_tfrs.csv"
-  midpoints_csv: "./data/midpoints.csv" # NEW: optional file with per-DPTO EEVV weights
+  midpoints_csv: "./data/midpoints.csv" # optional file with per-DPTO EEVV weights
 
 diagnostics:
   print_target_csv: true
 
 unabridging:
-  enabled: false # abridged (5-year ages)
+  enabled: true # unabridged (1-year ages)
 
 projections:
   start_year: 2018
-  end_year: 2100
-  step_years: 5
+  end_year: 2070
+  step_years: 1
   death_choices: ["EEVV", "censo_2018", "midpoint"]
   last_observed_year_by_death:
     EEVV: 2023
     censo_2018: 2018
     midpoint: 2018
-  period_years: 5
+  period_years: 1
   flows_latest_year: 2024
 
 fertility:
-  default_tfr_target: 1.2
-  convergence_years: 50
+  default_tfr_target: 1.45
+  convergence_years: 53
   smoother:
     kind: "exp"
     converge_frac: 0.99
@@ -33,13 +34,20 @@ fertility:
       mid_frac: 0.5
       steepness: null
 
-# NEW: default EEVV weight when midpoints.csv is missing or a DPTO isn't listed
 midpoints:
   default_eevv_weight: 0.5
 
 mortality:
   use_ma: true
   ma_window: 5
+  improvement_total: 0.10 # total proportional reduction in hazards by long run (e.g., 0.10 = 10%)
+  convergence_years: 50 # approximate horizon for convergence to ~target improvement
+  smoother:
+    kind: "exp" # "exp" or "logistic"
+    converge_frac: 0.99 # only used for kind="exp"; S(convergence_years)=converge_frac
+    logistic: # used for kind="logistic"
+      mid_frac: 0.5 # inflection at mid_frac * convergence_years
+      steepness: null # if null, auto-calibrate so S(convergence_years) ≈ 0.99
 
 age_bins:
   expected_bins:
@@ -91,7 +99,7 @@ runs:
     label_pattern: "{dist}_draw_{i}"
 
 parallel:
-  processes: 1
+  processes: 5
 
 filenames:
   asfr: "asfr.csv"

@@ -10,32 +10,85 @@ def _get_base_dir():
     return os.path.dirname(os.path.abspath(__file__))
 
 def return_default_config():
+    """
+    Build the default configuration dictionary used when no YAML file is found,
+    or when some keys are missing from the YAML (user values override these).
+
+    Notes
+    -----
+    - The 'mortality' block now includes parameters for the time-decaying
+      mortality improvement schedule used by main_compute.py:
+        * improvement_total: total long-run proportional reduction in hazards
+          (e.g., 0.10 => 10% lower hazards in the long run)
+        * convergence_years: horizon over which the schedule effectively
+          converges (used to scale the schedule in time)
+        * smoother.kind: "exp" or "logistic"
+          - For "exp": 'converge_frac' is the fraction of total improvement
+            achieved at 'convergence_years' (default 0.99).
+          - For "logistic": control the midpoint and steepness; if 'steepness'
+            is None it is auto-calibrated so S(convergence_years)≈0.99.
+    """
     return {
         "paths": {
             "data_dir": "./data",
             "results_dir": "./results",
             "target_tfr_csv": "./data/target_tfrs.csv",
-            "midpoints_csv": "./data/midpoints.csv",  # NEW
+            "midpoints_csv": "./data/midpoints.csv",  # optional per-DPTO EEVV weights
         },
         "diagnostics": {"print_target_csv": True},
         "projections": {
-            "start_year": 2018, "end_year": 2070, "step_years": 5,
+            "start_year": 2018,
+            "end_year": 2070,
+            "step_years": 5,
             "death_choices": ["EEVV", "censo_2018", "midpoint"],
-            "last_observed_year_by_death": {"EEVV": 2023, "censo_2018": 2018, "midpoint": 2018},
-            "period_years": 5, "flows_latest_year": 2021,
+            "last_observed_year_by_death": {
+                "EEVV": 2023,
+                "censo_2018": 2018,
+                "midpoint": 2018
+            },
+            "period_years": 5,
+            "flows_latest_year": 2021,
         },
         "fertility": {
-            "default_tfr_target": 1.5, "convergence_years": 50,
-            "smoother": {"kind": "exp", "converge_frac": 0.99, "logistic": {"mid_frac": 0.5, "steepness": None}},
+            "default_tfr_target": 1.5,
+            "convergence_years": 50,
+            "smoother": {
+                "kind": "exp",
+                "converge_frac": 0.99,
+                "logistic": {"mid_frac": 0.5, "steepness": None},
+            },
         },
-        "midpoints": {  # NEW: default EEVV weight if CSV missing / DPTO not found
+        "midpoints": {  # default EEVV weight if CSV missing / DPTO not found
             "default_eevv_weight": 0.5
         },
         "age_bins": {
-            "expected_bins": ["0-4","5-9","10-14","15-19","20-24","25-29","30-34","35-39","40-44","45-49","50-54","55-59","60-64","65-69","70-74","75-79","80+"],
-            "order":         ["0-4","5-9","10-14","15-19","20-24","25-29","30-34","35-39","40-44","45-49","50-54","55-59","60-64","65-69","70-74","75-79","80+"],
+            "expected_bins": [
+                "0-4","5-9","10-14","15-19","20-24","25-29",
+                "30-34","35-39","40-44","45-49","50-54","55-59",
+                "60-64","65-69","70-74","75-79","80+"
+            ],
+            "order": [
+                "0-4","5-9","10-14","15-19","20-24","25-29",
+                "30-34","35-39","40-44","45-49","50-54","55-59",
+                "60-64","65-69","70-74","75-79","80+"
+            ],
         },
-        "mortality": {"use_ma": True, "ma_window": 5},
+        # --- Mortality defaults (now include time-decaying improvement controls) ---
+        "mortality": {
+            "use_ma": True,
+            "ma_window": 5,
+            # NEW: total improvement and schedule (used by main_compute.py)
+            "improvement_total": 0.10,     # 10% long-run reduction in hazards
+            "convergence_years": 50,       # years to (approximately) converge
+            "smoother": {
+                "kind": "exp",             # "exp" or "logistic"
+                "converge_frac": 0.99,     # for "exp": S(convergence_years)=0.99
+                "logistic": {              # for "logistic" schedule only
+                    "mid_frac": 0.5,       # inflection at 50% of horizon
+                    "steepness": None      # auto-calibrate if None
+                },
+            },
+        },
         "runs": {
             "mode": "no_draws",
             "no_draws_tasks": [
@@ -43,42 +96,57 @@ def return_default_config():
                 {"sample_type": "low",  "distribution": None, "label": "low_omissions"},
                 {"sample_type": "high", "distribution": None, "label": "high_omissions"},
             ],
-            "draws": {"num_draws": 1000, "dist_types": ["uniform","pert","beta","normal"], "label_pattern": "{dist}_draw_{i}"},
+            "draws": {
+                "num_draws": 1000,
+                "dist_types": ["uniform","pert","beta","normal"],
+                "label_pattern": "{dist}_draw_{i}"
+            },
         },
         "unabridging": {"enabled": True},
-        "filenames": {"asfr": "asfr.csv", "lt_M": "lt_M_t.csv", "lt_F": "lt_F_t.csv", "lt_T": "lt_T_t.csv"},
+        "filenames": {
+            "asfr": "asfr.csv",
+            "lt_M": "lt_M_t.csv",
+            "lt_F": "lt_F_t.csv",
+            "lt_T": "lt_T_t.csv"
+        },
     }
 
-def _resolve(ROOT_DIR, p): return os.path.abspath(os.path.join(ROOT_DIR, p))
+def _resolve(ROOT_DIR, p):
+    return os.path.abspath(os.path.join(ROOT_DIR, p))
 
 def _load_config(ROOT_DIR: str, path: str) -> dict:
     """
     Load YAML config if present; otherwise use defaults.
-    Returns (cfg, PATHS) where
-      - cfg merges user YAML over defaults
-      - PATHS resolves relevant file-system paths relative to ROOT_DIR
+    Returns (cfg, PATHS) where:
+      - cfg merges user YAML over defaults (deep-merge on dict leaves),
+      - PATHS resolves relevant file-system paths relative to ROOT_DIR.
     """
     if not os.path.exists(path):
         print(f"[config] No config file at {path}; using built-in defaults.")
-        return return_default_config(), {
-            "data_dir": _resolve(ROOT_DIR, "./data"),
-            "results_dir": _resolve(ROOT_DIR, "./results"),
-            "target_tfr_csv": _resolve(ROOT_DIR, "./data/target_tfrs.csv"),
-            "midpoints_csv": _resolve(ROOT_DIR, "./data/midpoints.csv"),
+        cfg = return_default_config()
+        return cfg, {
+            "data_dir": _resolve(ROOT_DIR, cfg["paths"]["data_dir"]),
+            "results_dir": _resolve(ROOT_DIR, cfg["paths"]["results_dir"]),
+            "target_tfr_csv": _resolve(ROOT_DIR, cfg["paths"]["target_tfr_csv"]),
+            "midpoints_csv": _resolve(ROOT_DIR, cfg["paths"].get("midpoints_csv", "./data/midpoints.csv")),
         }
+
     with open(path, "r", encoding="utf-8") as fh:
         cfg_user = yaml.safe_load(fh) or {}
     cfg = return_default_config().copy()
     for k, v in cfg_user.items():
         if isinstance(v, dict) and isinstance(cfg.get(k), dict):
-            d = cfg[k].copy(); d.update(v); cfg[k] = d
+            d = cfg[k].copy()
+            d.update(v)
+            cfg[k] = d
         else:
             cfg[k] = v
+
     PATHS = {
         "data_dir": _resolve(ROOT_DIR, cfg["paths"]["data_dir"]),
         "results_dir": _resolve(ROOT_DIR, cfg["paths"]["results_dir"]),
         "target_tfr_csv": _resolve(ROOT_DIR, cfg["paths"]["target_tfr_csv"]),
-        "midpoints_csv": _resolve(ROOT_DIR, cfg["paths"].get("midpoints_csv", "./data/midpoints.csv"))
+        "midpoints_csv": _resolve(ROOT_DIR, cfg["paths"].get("midpoints_csv", "./data/midpoints.csv")),
     }
     return cfg, PATHS
 
@@ -134,9 +202,12 @@ def get_fertility():
     Load 'asfr' columns from fertility draw CSVs across specified distributions,
     return a consolidated DataFrame of ASFR draws and a DataFrame of TFR values.
 
-    Returns:
-        stacked_df_all (pd.DataFrame): Concatenated ASFR series for all distributions.
-        tfr_df (pd.DataFrame): Total Fertility Rate (TFR) draws per distribution.
+    Returns
+    -------
+    stacked_df_all : pd.DataFrame
+        Concatenated ASFR series for all distributions.
+    tfr_df : pd.DataFrame
+        Total Fertility Rate (TFR) draws per distribution.
     """
     base_dir = _get_base_dir()
     distributions = ["beta", "normal", "pert", "uniform"]
@@ -173,7 +244,7 @@ def get_fertility():
 
 def read_rds_file(file_path: str) -> pd.DataFrame:
     """
-    Reads an RDS file and extracts the DataFrame.
+    Reads an RDS file and returns the contained DataFrame.
     """
     try:
         result = pyreadr.read_r(file_path)
@@ -206,7 +277,24 @@ def correct_valor_for_omission(
 ) -> pd.Series:
     """
     Apply correction to VALOR using OMISION intervals; vectorized implementation
-    that gives each row its own independent draw when distribution is specified.
+    that gives each row its own independent draw when 'distribution' is specified.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+    sample_type : {'low','mid','high'}
+        Deterministic endpoint/midpoint choice when distribution is None.
+    distribution : {'uniform','pert','beta','normal'} or None
+        If provided, one random draw per row within the row's omission range.
+    valor_col : str
+        Column containing the raw counts to be corrected.
+    omision_col : str
+        Column containing omission level codes (1..5).
+
+    Returns
+    -------
+    pd.Series
+        The corrected values aligned to df.index.
     """
     # 1) Define omission‐interval bounds and mid‐points
     omission_ranges = {
@@ -265,9 +353,7 @@ def correct_valor_for_omission(
                 mask_bad = (draws < a) | (draws > b)
 
         else:
-            raise ValueError(
-                "distribution must be 'uniform', 'pert', 'beta', or 'normal'"
-            )
+            raise ValueError("distribution must be 'uniform', 'pert', 'beta', or 'normal'")
 
         eps.loc[valid] = draws
 
