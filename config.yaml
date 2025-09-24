@@ -1,22 +1,24 @@
-# config.yaml
-
 paths:
   data_dir: "./data"
   results_dir: "./results_unabridged"
   target_tfr_csv: "./data/target_tfrs.csv"
   midpoints_csv: "./data/midpoints.csv"
-  mortality_improvements_csv: "./data/mortality_improvements.csv" # <-- NEW & USED
+  mortality_improvements_csv: "./data/mortality_improvements.csv"
 
 diagnostics:
   print_target_csv: true
-  mortality_improvements_debug: true # optional: prints a few factors each year
+  mortality_improvements_debug: true
+
+# Housekeeping / run behavior
+housekeeping:
+  clean_run: false        # if true: delete 'results_dir' before running (use with care)
 
 unabridging:
   enabled: true
 
 projections:
   start_year: 2018
-  end_year: 2070
+  end_year: 2069  # note this will produce projections to end_year + 1
   step_years: 1
   death_choices: ["EEVV", "censo_2018", "midpoint"]
   last_observed_year_by_death:
@@ -28,13 +30,18 @@ projections:
 
 fertility:
   default_tfr_target: 1.45
-  convergence_years: 53
+  convergence_years: 52
   smoother:
     kind: "exp"
     converge_frac: 0.99
     logistic:
       mid_frac: 0.5
       steepness: null
+  # Joint sweep over the target TFR (inclusive bounds)
+  default_tfr_target_range:
+    start: 1.1
+    stop: 1.5
+    step: 0.05
 
 midpoints:
   default_eevv_weight: 0.5
@@ -42,62 +49,44 @@ midpoints:
 mortality:
   use_ma: true
   ma_window: 5
-  improvement_total: 0.10 # default if DPTO missing in CSV
-  convergence_years: 50
+  improvement_total: 0.2  # default if DPTO missing in CSV
+  convergence_years: 52
   smoother:
-    kind: "exp" # "exp" or "logistic"
+    kind: "exp"
     converge_frac: 0.99
     logistic:
       mid_frac: 0.5
       steepness: null
+  # Joint sweep over total mortality improvement (fraction, not percent).
+  improvement_total_range:
+    start: 0.4
+    stop: 0.2
+    step: 0.05
+  # Joint sweep over the moving-average window used in life-table smoothing.
+  ma_window_range:
+    start: 3
+    stop: 7
+    step: 1
 
 age_bins:
   expected_bins:
     [
-      "0-4",
-      "5-9",
-      "10-14",
-      "15-19",
-      "20-24",
-      "25-29",
-      "30-34",
-      "35-39",
-      "40-44",
-      "45-49",
-      "50-54",
-      "55-59",
-      "60-64",
-      "65-69",
-      "70-74",
-      "75-79",
-      "80+",
+      "0-4", "5-9", "10-14", "15-19", "20-24", "25-29",
+      "30-34", "35-39", "40-44", "45-49", "50-54", "55-59",
+      "60-64", "65-69", "70-74", "75-79", "80+",
     ]
   order:
     [
-      "0-4",
-      "5-9",
-      "10-14",
-      "15-19",
-      "20-24",
-      "25-29",
-      "30-34",
-      "35-39",
-      "40-44",
-      "45-49",
-      "50-54",
-      "55-59",
-      "60-64",
-      "65-69",
-      "70-74",
-      "75-79",
-      "80+",
+      "0-4", "5-9", "10-14", "15-19", "20-24", "25-29",
+      "30-34", "35-39", "40-44", "45-49", "50-54", "55-59",
+      "60-64", "65-69", "70-74", "75-79", "80+",
     ]
 
 runs:
   mode: "no_draws"
   no_draws_tasks:
-    - { sample_type: "mid", distribution: null, label: "mid_omissions" }
-    - { sample_type: "low", distribution: null, label: "low_omissions" }
+    - { sample_type: "mid",  distribution: null, label: "mid_omissions" }
+    - { sample_type: "low",  distribution: null, label: "low_omissions" }
     - { sample_type: "high", distribution: null, label: "high_omissions" }
   draws:
     num_draws: 1000
@@ -105,7 +94,7 @@ runs:
     label_pattern: "{dist}_draw_{i}"
 
 parallel:
-  processes: 5
+  processes: 4    # increase to use more CPU cores
 
 filenames:
   asfr: "asfr.csv"
