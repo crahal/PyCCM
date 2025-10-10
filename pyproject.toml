@@ -21,17 +21,8 @@ dependencies = [
 
 [project.license]
 text = "MIT"
-
-[tool.setuptools.packages.find]
-where = [
-    "src",
-]
-
 [tool.ruff]
 line-length = 100
 
 [tool.pdm]
-distribution = false
-packages = [
-    { include = "PyCCM", from = "src" },
-]
+distribution = false]
