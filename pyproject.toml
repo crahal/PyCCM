@@ -1,26 +1,37 @@
-[build-system]
-requires = ["setuptools>=64", "wheel"]
-build-backend = "setuptools.build_meta"
-
 [project]
-name = "pyccm"
+name = "PyCCM"
 version = "0.1.0"
-description = "Population projection pipeline with joint parameter sweeps"
+description = "Default template for PDM package"
 authors = [
-  { name = "PyCCM Contributors" }
+    { name = "PyCCM Contributors" },
+    { name = "crahal", email = "charlierahal@gmail.com" },
 ]
-license = { text = "MIT" }
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = "==3.11.*"
 dependencies = [
-  "numpy>=1.23",
-  "pandas>=2.0",
-  "tqdm>=4.65",
-  "pyarrow>=14.0"
+    "numpy>=1.23",
+    "pandas>=2.0",
+    "tqdm>=4.65",
+    "pyarrow>=14.0",
+    "PyCCM @ file:///${PROJECT_ROOT}/",
+    "geopandas>=1.1.1",
+    "mapclassify>=2.10.0",
+    "shapely>=2.1.2",
 ]
+
+[project.license]
+text = "MIT"
 
 [tool.setuptools.packages.find]
-where = ["src"]
+where = [
+    "src",
+]
 
 [tool.ruff]
 line-length = 100
+
+[tool.pdm]
+distribution = false
+packages = [
+    { include = "PyCCM", from = "src" },
+]
