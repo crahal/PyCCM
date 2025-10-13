@@ -4,6 +4,7 @@ import re
 import numpy as np
 import pandas as pd
 
+
 def save_projections(
     proj_F, proj_M, proj_T,
     sample_type, distribution, suffix, death_choice, year,
@@ -25,6 +26,12 @@ def save_projections(
         df_struct.to_csv(os.path.join(out_path, f"{key}{suffix}{death_choice}.csv"), index=False)
 
 
+
+
+
+
+
+
 def save_LL(
     L_MM, L_MF, L_FF,
     death_choice, DPTO, sample_type, distribution, suffix, year,
@@ -42,15 +49,33 @@ def save_LL(
         pd.DataFrame(mat).to_csv(os.path.join(out_path, f"{label}{suffix}{year}.csv"), index=False)
 
 
+
+
+
+
+
+
 def _s_open_from_ex(step: float, e: float) -> float:
     if not np.isfinite(e) or e <= 0:
         return 0.0
     return float(np.clip(np.exp(-step / e), 0.0, 1.0))
 
 
+
+
+
+
+
+
 def _hazard_from_survival(s: float, step: float) -> float:
     s = float(np.clip(s, 1e-12, 1.0))
     return -np.log(s) / step
+
+
+
+
+
+
 
 
 def _format_age_labels_from_lifetable_index(ages: np.ndarray, step: int) -> list[str]:
@@ -68,6 +93,12 @@ def _format_age_labels_from_lifetable_index(ages: np.ndarray, step: int) -> list
         else:
             labels.append(f"{a}+")
     return labels
+
+
+
+
+
+
 
 
 def make_projections(
@@ -93,6 +124,9 @@ def make_projections(
       - L_MM, L_MF, L_FF
       - age_structures_df_M, age_structures_df_F, age_structures_df_T
 
+
+
+
     Notes:
       - Fertility columns begin at fert_start_idx and span len(asfr_2018).
       - Survival is derived from life tables with optional trend improvements.
@@ -100,13 +134,22 @@ def make_projections(
     k = n + 1
     columns = [f"t+{i}" for i in range(X + 1)]
 
+
+
+
     L_FF = np.zeros((k, k))
     L_MF = np.zeros((k, k))
     L_MM = np.zeros((k, k))
 
+
+
+
     srb = float(np.nansum(conteos_all_2018_M_n_t) / np.nansum(conteos_all_2018_F_n_t))
     p_f = 1.0 / (1.0 + srb) if np.isfinite(srb) and srb > 0 else 0.5
     p_m = 1.0 - p_f
+
+
+
 
     if "n" in lt_2018_F_t.columns:
         step = float(lt_2018_F_t["n"].iloc[0])
@@ -115,12 +158,18 @@ def make_projections(
         step = float(age_idx[1] - age_idx[0])
     step_int = int(round(step))
 
+
+
+
     if "lx" not in lt_2018_F_t.columns or "lx" not in lt_2018_M_t.columns:
         raise ValueError("Life tables must include an 'lx' column.")
     lxf = lt_2018_F_t["lx"].to_numpy(dtype=float)
     lxm = lt_2018_M_t["lx"].to_numpy(dtype=float)
     if len(lxf) != k or len(lxm) != k:
         raise ValueError(f"'lx' length must equal n+1 = {k} for both sexes.")
+
+
+
 
     sF_base = np.ones(k, dtype=float)
     sM_base = np.ones(k, dtype=float)
@@ -130,15 +179,24 @@ def make_projections(
         sF_base[i] = lxf[i] / denom_f if denom_f > 0 else 0.0
         sM_base[i] = lxm[i] / denom_m if denom_m > 0 else 0.0
 
+
+
+
     eF = float(lt_2018_F_t["ex"].iloc[-1])
     eM = float(lt_2018_M_t["ex"].iloc[-1])
     sF_open_base = _s_open_from_ex(step, eF)
     sM_open_base = _s_open_from_ex(step, eM)
 
+
+
+
     mF_base = np.array([_hazard_from_survival(s, step) for s in sF_base], dtype=float)
     mM_base = np.array([_hazard_from_survival(s, step) for s in sM_base], dtype=float)
     mF_base[-1] = _hazard_from_survival(sF_open_base, step)
     mM_base[-1] = _hazard_from_survival(sM_open_base, step)
+
+
+
 
     if hasattr(asfr_2018, "columns"):
         asfr_series = asfr_2018["asfr"]
@@ -147,11 +205,17 @@ def make_projections(
         asfr_series = asfr_2018
         asfr_index = asfr_2018.index
 
+
+
+
     def lower_age(lbl):
         m = re.search(r"\d+", str(lbl))
         if not m:
             raise ValueError(f"Cannot parse age label: {lbl!r}")
         return int(m.group(0))
+
+
+
 
     fert_ages = [lower_age(a) for a in asfr_index]
     n_fert = len(fert_ages)
@@ -160,6 +224,9 @@ def make_projections(
         raise ValueError("Fertility columns exceed matrix dimension.")
     births_per_woman = step * asfr_series.to_numpy(dtype=float)
 
+
+
+
     n0_F = np.asarray(conteos_all_2018_F_p_t, dtype=float).copy()
     n0_M = np.asarray(conteos_all_2018_M_p_t, dtype=float).copy()
     if n0_F.shape[0] != k or n0_M.shape[0] != k:
@@ -167,11 +234,20 @@ def make_projections(
     n0_F = np.nan_to_num(n0_F, nan=0.0, posinf=0.0, neginf=0.0)
     n0_M = np.nan_to_num(n0_M, nan=0.0, posinf=0.0, neginf=0.0)
 
+
+
+
     net_F = np.nan_to_num(np.asarray(net_F, float), nan=0.0, posinf=0.0, neginf=0.0)
     net_M = np.nan_to_num(np.asarray(net_M, float), nan=0.0, posinf=0.0, neginf=0.0)
 
+
+
+
     n_proj_F = [n0_F]
     n_proj_M = [n0_M]
+
+
+
 
     for t in range(1, X + 1):
         mF_t = mF_base * (1.0 - float(mort_improv_F)) ** t
@@ -179,24 +255,42 @@ def make_projections(
         sF_t = np.exp(-mF_t * step)
         sM_t = np.exp(-mM_t * step)
 
+
+
+
         L_FF.fill(0.0); L_MF.fill(0.0); L_MM.fill(0.0)
+
+
+
 
         for i in range(1, k):
             L_FF[i, i - 1] = sF_t[i]
             L_MM[i, i - 1] = sM_t[i]
 
+
+
+
         L_FF[-1, -1] = sF_t[-1]
         L_MM[-1, -1] = sM_t[-1]
+
+
+
 
         S0_t = sF_t[1] if k > 1 else 1.0
         for j, col in enumerate(fert_cols):
             L_FF[0, col] = p_f * S0_t * births_per_woman[j]
             L_MF[0, col] = p_m * S0_t * births_per_woman[j]
 
+
+
+
         n_next_F = (L_FF @ n_proj_F[-1]) + (net_F / 2.0)
         n_next_M = (L_MM @ n_proj_M[-1]) + (net_M / 2.0) + (L_MF @ n_proj_F[-1])
         n_proj_F.append(n_next_F)
         n_proj_M.append(n_next_M)
+
+
+
 
     try:
         base_ages = lt_2018_F_t.index.astype(int).to_numpy()
@@ -206,15 +300,30 @@ def make_projections(
         else:
             raise
 
+
+
+
     edad_labels = _format_age_labels_from_lifetable_index(base_ages, step_int)
+
+
+
 
     age_structure_matrix_F = np.column_stack(n_proj_F)
     age_structures_df_F = pd.DataFrame(age_structure_matrix_F, index=edad_labels, columns=columns)
 
+
+
+
     age_structure_matrix_M = np.column_stack(n_proj_M)
     age_structures_df_M = pd.DataFrame(age_structure_matrix_M, index=edad_labels, columns=columns)
 
+
+
+
     age_structures_df_T = age_structures_df_F.fillna(0.0) + age_structures_df_M.fillna(0.0)
+
+
+
 
     def _finalize(df, sex: str):
         df = df.reset_index().rename(columns={"index": "EDAD"})
@@ -226,8 +335,14 @@ def make_projections(
         df["death_choice"] = death_choice
         return df[["EDAD", "DPTO_NOMBRE", "year", "VALOR_corrected", "death_choice"]]
 
+
+
+
     age_structures_df_F = _finalize(age_structures_df_F, "female")
     age_structures_df_M = _finalize(age_structures_df_M, "male")
+
+
+
 
     age_structures_df_T = age_structures_df_T.reset_index().rename(columns={"index": "EDAD"})
     age_structures_df_T["year"] = year + step_int
@@ -237,5 +352,6 @@ def make_projections(
     age_structures_df_T["DPTO_NOMBRE"] = DPTO
     age_structures_df_T["death_choice"] = death_choice
     age_structures_df_T = age_structures_df_T[["EDAD", "DPTO_NOMBRE", "year", "VALOR_corrected", "death_choice"]]
+
 
     return L_MM, L_MF, L_FF, age_structures_df_M, age_structures_df_F, age_structures_df_T
