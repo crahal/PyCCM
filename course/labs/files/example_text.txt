@@ -1,0 +1,4 @@
+This is an example text file 
+It contains multiple rows 
+I hope you are enjoying the python course so far! 
+Bono oculto: si ves esta frase, ¡tomemos un descanso de 5 minutos!
