@@ -214,9 +214,9 @@ If this work supports your research, please cite the repo:
 ```
 @software{PyCCM,
   title = {PyCCM: Population projection pipeline with joint parameter sweeps},
-  author = {Rahal, C., Jaramillo, J.},
+  author = {Rahal, C., Jaramillo, J. and Yan, J.},
   year = {2025},
-  url = {https://github.com/your-org/PyCCM}
+  url = {https://github.com/crahal/PyCCM}
 }
 ```
 
