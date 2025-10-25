@@ -1,7 +1,7 @@
 # Demographic Research Methods and the PyCCM Library  
 ## Day Five: Introducing PyCCM  
 **Instructors:** Charles Rahal and Jiani Yan  
-**Date:** October 30, 2025  
+**Date:** October 31, 2025  
 
 ---
 
