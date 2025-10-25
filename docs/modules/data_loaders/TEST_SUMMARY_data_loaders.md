@@ -54,7 +54,7 @@ Created comprehensive unit tests with **38 test cases** covering:
 - Tests all statistical distributions (uniform, pert, beta, normal)
 - Tests proportional allocation logic
 - Tests configuration merging and path resolution
-- All 38 tests passing ✅
+- All 38 tests passing 
 
 ## Running Tests
 

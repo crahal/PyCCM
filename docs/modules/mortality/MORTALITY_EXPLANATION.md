@@ -346,7 +346,7 @@ Smoothed: 10 → 10.5 → 11.2 (monotonic increase)
 
 ## Design Decisions
 
-### ✅ Good Choices
+###  Good Choices
 
 **1. Penalized Spline Approach**
 - State-of-the-art method (Currie et al., 2004)
@@ -374,7 +374,7 @@ Smoothed: 10 → 10.5 → 11.2 (monotonic increase)
 - Standard actuarial $q_x$ from $m_x$
 - Radix = 100,000 (conventional)
 
-### ⚠️ Potential Issues
+###  Potential Issues
 
 **1. Uniform Splitting of Deaths**
 ```python

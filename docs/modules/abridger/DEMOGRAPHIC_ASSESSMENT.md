@@ -2,7 +2,7 @@
 
 **Date:** October 19, 2025  
 **Reviewer Perspective:** Demographic Methodology  
-**Overall Assessment:** ⭐⭐⭐⭐ (4/5 stars - Good with improvement opportunities)
+**Overall Assessment:**  (4/5 stars - Good with improvement opportunities)
 
 ---
 
@@ -10,14 +10,14 @@
 
 The `abridger.py` module implements **age disaggregation** (unabridging) for demographic data using constrained optimization with smoothness penalties. From a demographic perspective, this approach is **methodologically sound** and represents best practices in the field.
 
-### ✅ Strengths
+###  Strengths
 1. Uses life table theory for infant age distribution (demographically correct)
 2. Smoothness constraints appropriate for age schedules
 3. Preserves totals exactly (mass conservation)
 4. Handles edge cases well
 5. Different patterns for population vs mortality (demographically aware)
 
-### ⚠️ Areas for Improvement
+###  Areas for Improvement
 1. Hardcoded life table parameters (not region/period-specific)
 2. Geometric weights could be calibrated to empirical data
 3. Missing validation of demographic plausibility
@@ -40,12 +40,12 @@ def default_survivorship_0_to_5() -> Dict[int, float]:
 
 ### Demographic Evaluation
 
-#### ✅ **Correct Approach:**
+####  **Correct Approach:**
 - Uses **nLx person-years lived** from life tables
 - Applies **infant separation factor a₀ = 0.10** (reasonable for low-mortality populations)
 - Recognizes that infant deaths are concentrated in early months (not uniform over first year)
 
-#### ⚠️ **Issues:**
+####  **Issues:**
 
 **Issue 1: Hardcoded Mortality Rates**
 ```
@@ -124,12 +124,12 @@ def _solve_smooth(A, b, n, ridge=1e-6):
 
 ### Demographic Evaluation
 
-#### ✅ **Excellent Approach:**
+####  **Excellent Approach:**
 - **Second differences** penalize roughness: encourages smooth age schedules
 - Appropriate for age-specific rates which are **generally smooth** in nature
 - Ridge regularization prevents overfitting
 
-#### ⚠️ **Potential Issues:**
+####  **Potential Issues:**
 
 **Issue 4: Fixed Ridge Parameter**
 ```
@@ -206,13 +206,13 @@ def add_demographic_shape_constraint(variable: str, ages: List[int]) -> np.ndarr
 
 ### Demographic Evaluation
 
-#### ✅ **Good Approach:**
+####  **Good Approach:**
 - Using population structure for migration is **theoretically sound** (Rogers-Castro model)
 - Different patterns for population vs deaths is **correct**
   - Population: Decreasing with age (survival attrition)
   - Deaths: Increasing with age (mortality acceleration)
 
-#### ⚠️ **Issues:**
+####  **Issues:**
 
 **Issue 6: Geometric Ratios Are Arbitrary**
 ```
@@ -227,7 +227,7 @@ Question: Where do these come from?
 ```
 Colombia 2020 Census (ages 70+):
   70-74: 1,200,000  (100%)
-  75-79:   850,000  ( 71%)  ← ratio = 0.71 ✓ close to 0.70
+  75-79:   850,000  ( 71%)  ← ratio = 0.71  close to 0.70
   80-84:   520,000  ( 61%)  ← ratio = 0.61 (not 0.70)
   85-89:   280,000  ( 54%)  ← ratio = 0.54 (not 0.70)
   90+:     140,000  ( 50%)  ← ratio = 0.50 (not 0.70)
@@ -319,11 +319,11 @@ Uses population structure as template for splitting migration tails.
 
 ### Demographic Evaluation
 
-#### ✅ **Theoretically Sound:**
+####  **Theoretically Sound:**
 - **Rogers-Castro model:** Migration rates follow population structure (mostly)
 - Age patterns of migration related to age structure
 
-#### ⚠️ **Issues:**
+####  **Issues:**
 
 **Issue 8: Migration Is More Age-Selective Than Population**
 
@@ -595,13 +595,13 @@ def fit_brass_logit_mortality(ages: List[int], deaths: np.ndarray) -> np.ndarray
 
 ## Overall Assessment
 
-### What's Working Well ✅
+### What's Working Well 
 - Core mathematical approach is sound
 - Smoothness constraints appropriate
 - Total preservation correct
 - Code is well-structured
 
-### Critical Gaps ⚠️
+### Critical Gaps 
 - **Lacks demographic calibration** (hardcoded parameters)
 - **No validation** of demographic plausibility
 - **Generic smoothing** doesn't use domain knowledge

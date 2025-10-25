@@ -163,11 +163,11 @@ After split "70+":
   70-74  100  (original)
 
 After groupby sum:
-  70-74  285  ✓ (correct aggregation)
+  70-74  285   (correct aggregation)
 ```
 **Resolution:** Lines 423-427 correctly handle this with `.groupby().sum()`.
 
-#### Issue 6: **Both 70+ and 80+ Present** ✅ RESOLVED
+#### Issue 6: **Both 70+ and 80+ Present**  RESOLVED
 **Location:** Lines 430-461
 **Status:** Code correctly handles this case via sequential processing.
 

@@ -1,7 +1,7 @@
 # API Simplification: `_geom_weights()` Function
 
 **Date:** October 22, 2025  
-**Status:** ✅ Completed
+**Status:**  Completed
 
 ---
 
@@ -122,11 +122,11 @@ w = _geom_weights(bands, r=1.0)  # r = 1 → uniform
 
 ### Benefits
 
-✅ **Clearer API**: One parameter with direct semantic meaning  
-✅ **Less Confusion**: No mixed signals from r value vs increasing flag  
-✅ **Easier to Use**: Just pick the right r value  
-✅ **Self-Documenting**: r < 1 vs r > 1 is intuitive  
-✅ **Fewer Bugs**: Can't set mismatched (r, increasing) combinations  
+ **Clearer API**: One parameter with direct semantic meaning  
+ **Less Confusion**: No mixed signals from r value vs increasing flag  
+ **Easier to Use**: Just pick the right r value  
+ **Self-Documenting**: r < 1 vs r > 1 is intuitive  
+ **Fewer Bugs**: Can't set mismatched (r, increasing) combinations  
 
 ---
 
@@ -135,23 +135,23 @@ w = _geom_weights(bands, r=1.0)  # r = 1 → uniform
 ### Test Results
 
 **Before Changes:**
-- 46 abridger tests: ✅ All passing
-- 33 harmonization tests: ✅ All passing
+- 46 abridger tests:  All passing
+- 33 harmonization tests:  All passing
 
 **After Changes:**
-- 46 abridger tests: ✅ All passing
-- 33 harmonization tests: ✅ All passing
+- 46 abridger tests:  All passing
+- 33 harmonization tests:  All passing
 
 ### Test Coverage
 
 All test cases validated:
-- ✅ Decreasing weights (r < 1)
-- ✅ Increasing weights (r > 1)
-- ✅ Uniform weights (r = 1)
-- ✅ Population tail splits (r=0.70)
-- ✅ Death tail splits (r=1.45)
-- ✅ Total preservation
-- ✅ Weight normalization
+-  Decreasing weights (r < 1)
+-  Increasing weights (r > 1)
+-  Uniform weights (r = 1)
+-  Population tail splits (r=0.70)
+-  Death tail splits (r=1.45)
+-  Total preservation
+-  Weight normalization
 
 ---
 
@@ -166,7 +166,7 @@ r = 0.70  # r < 1 → decreasing weights
 weights = _geom_weights(bands, r)
 # Sequence: [1.0, 0.7, 0.49, 0.34, 0.24]
 # Normalized: [0.357, 0.250, 0.175, 0.122, 0.086]
-# Result: Younger bands get more weight ✓
+# Result: Younger bands get more weight 
 ```
 
 ### Death Tail (Increasing)
@@ -178,7 +178,7 @@ r = 1.45  # r > 1 → increasing weights
 weights = _geom_weights(bands, r)
 # Sequence: [1.0, 1.45, 2.10]
 # Normalized: [0.220, 0.319, 0.462]
-# Result: Older bands get more weight ✓
+# Result: Older bands get more weight 
 ```
 
 ### Uniform Weights
@@ -190,7 +190,7 @@ r = 1.0  # r = 1 → uniform weights
 weights = _geom_weights(bands, r)
 # Sequence: [1.0, 1.0, 1.0]
 # Normalized: [0.333, 0.333, 0.333]
-# Result: All bands equal ✓
+# Result: All bands equal 
 ```
 
 ---
@@ -203,12 +203,12 @@ If you have custom code calling `_geom_weights()`:
 
 **Old code:**
 ```python
-w = _geom_weights(bands, r=0.7, increasing=False)  # ❌ Will fail
+w = _geom_weights(bands, r=0.7, increasing=False)  #  Will fail
 ```
 
 **New code:**
 ```python
-w = _geom_weights(bands, r=0.7)  # ✅ Correct
+w = _geom_weights(bands, r=0.7)  #  Correct
 ```
 
 ### Semantic Equivalence
@@ -226,4 +226,4 @@ w = _geom_weights(bands, r=0.7)  # ✅ Correct
 
 This simplification makes the `_geom_weights()` function more intuitive and maintainable. The API now directly reflects the mathematical behavior, making it easier for users to understand and use correctly. All tests pass, confirming that the functionality is preserved while improving clarity.
 
-**Status:** ✅ Production Ready
+**Status:**  Production Ready

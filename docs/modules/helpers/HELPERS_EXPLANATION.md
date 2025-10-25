@@ -317,7 +317,7 @@ Helpers module imports only numpy and pandas, never project modules.
    - Age bin consistency
    - Total preservation
 
-**All 40 tests passing** ✓
+**All 40 tests passing** 
 
 ## Integration Points
 

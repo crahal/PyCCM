@@ -306,7 +306,7 @@ Where:
 **1. International Migration**
 - Between countries
 - Colombia ↔ Venezuela, USA, Spain, etc.
-- **What this module handles:** ✓
+- **What this module handles:** 
 
 **2. Internal Migration**
 - Between departments within Colombia
@@ -401,7 +401,7 @@ ANO  EDAD   SEXO  inmigracion_F  emigracion_F  net_migration  poblacion_total  n
 
 ## Design Decisions
 
-### ✅ Good Choices
+###  Good Choices
 
 **1. Robust Data Cleaning**
 ```python
@@ -440,7 +440,7 @@ np.where(denom > 0, net_migration / denom, np.nan)
 
 ---
 
-### ⚠️ Potential Issues
+###  Potential Issues
 
 **1. Hardcoded Age Groups**
 ```python
@@ -648,23 +648,23 @@ net_mig_rate[age] = 0.003  # Same for males and females
 
 ### Strengths
 
-1. ✅ Robust data cleaning (handles invalid values)
-2. ✅ Age- and sex-specific rates (best practice)
-3. ✅ Flexible year filtering (single or multiple)
-4. ✅ Safe calculations (no division by zero)
-5. ✅ Preserves gross flows (for analysis)
+1.  Robust data cleaning (handles invalid values)
+2.  Age- and sex-specific rates (best practice)
+3.  Flexible year filtering (single or multiple)
+4.  Safe calculations (no division by zero)
+5.  Preserves gross flows (for analysis)
 
 ### Limitations
 
-1. ⚠️ Hardcoded age groups (not flexible)
-2. ⚠️ No input validation (assumes format)
-3. ⚠️ Silent coercion (missing data → 0)
-4. ⚠️ Single year (no temporal smoothing)
-5. ⚠️ Assumes constant rates (projection limitation)
+1.  Hardcoded age groups (not flexible)
+2.  No input validation (assumes format)
+3.  Silent coercion (missing data → 0)
+4.  Single year (no temporal smoothing)
+5.  Assumes constant rates (projection limitation)
 
 ### Overall Assessment
 
-**For its purpose (processing migration data for projections):** ✅ **Well done**
+**For its purpose (processing migration data for projections):**  **Well done**
 
 **Code quality:** 4/5 stars (could use more validation, flexibility)  
 **Demographic correctness:** 5/5 stars (uses rates, age-sex-specific, correct formulas)

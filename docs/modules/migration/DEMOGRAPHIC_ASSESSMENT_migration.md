@@ -2,7 +2,7 @@
 
 **Date:** October 20, 2025  
 **Reviewer Perspective:** Demographic Methodology  
-**Overall Assessment:** ⭐⭐⭐⭐ (4/5 stars - Very Good with improvement opportunities)
+**Overall Assessment:**  (4/5 stars - Very Good with improvement opportunities)
 
 ---
 
@@ -10,14 +10,14 @@
 
 The `migration.py` module processes **migration data for cohort-component projections**, aggregating department-level flows to national totals and computing net migration rates by age and sex. The core approach is **demographically sound**, using age- and sex-specific rates (best practice), but the implementation has room for improvement in flexibility, validation, and temporal smoothing.
 
-### ✅ Strengths
+###  Strengths
 1. **Age- and sex-specific rates** (demographic best practice)
 2. **Robust data cleaning** (handles invalid values gracefully)
 3. **Safe division** (avoids division by zero)
 4. **Preserves gross flows** (immigration and emigration separately)
 5. **Flexible year filtering** (single or multiple years)
 
-### ⚠️ Areas for Improvement
+###  Areas for Improvement
 1. **No temporal smoothing** (uses single year, ignores trends)
 2. **Hardcoded age groups** (inflexible to different data formats)
 3. **No input validation** (assumes specific column names)
@@ -43,7 +43,7 @@ Where:
 - $s$ = Sex
 - $t$ = Time (year)
 
-✓ **Correctly implemented** (line 62)
+ **Correctly implemented** (line 62)
 
 ---
 
@@ -54,7 +54,7 @@ Where:
 - $m$ = Net migration rate
 - $P$ = Population (denominator)
 
-✓ **Correctly implemented** (line 64)
+ **Correctly implemented** (line 64)
 
 **Demographic Interpretation:**
 - Rate of **0.005** (0.5%) = 5 per 1,000 population
@@ -65,7 +65,7 @@ Where:
 
 ---
 
-### ✅ What's Done Right
+###  What's Done Right
 
 **1. Rate-Based Approach (Not Absolute Numbers)**
 
@@ -86,7 +86,7 @@ net_mig_rate[age] = 0.005  # Proportion
 2050: Pop = 2M × 0.005 = +10K (maintains relative impact)
 ```
 
-✓ **Best practice for multi-decade projections**
+ **Best practice for multi-decade projections**
 
 ---
 
@@ -107,7 +107,7 @@ Age     Net Mig Rate   Why?
 65+     Very low       Retirees
 ```
 
-**Your code:** Age-specific ✓
+**Your code:** Age-specific 
 
 **Comparison to alternatives:**
 ```python
@@ -119,7 +119,7 @@ net_mig_rate['20-24'] = 0.008  # High
 net_mig_rate['65-69'] = 0.001  # Low
 ```
 
-✓ **Captures age selectivity correctly**
+ **Captures age selectivity correctly**
 
 ---
 
@@ -139,9 +139,9 @@ Migration differs by sex:
 **Crisis migration (Venezuela → Colombia 2018):**
 - Relatively balanced (whole families fleeing)
 
-**Your code:** Sex-specific ✓
+**Your code:** Sex-specific 
 
-✓ **Allows sex differences in migration propensity**
+ **Allows sex differences in migration propensity**
 
 ---
 
@@ -165,13 +165,13 @@ Migration differs by sex:
 - Data quality checks (implausible ratios)
 - Demographic accounting
 
-✓ **Good design for transparency**
+ **Good design for transparency**
 
 ---
 
 ## 2. Demographic Issues & Improvements
 
-### ⚠️ Issue 1: No Temporal Smoothing
+###  Issue 1: No Temporal Smoothing
 
 **Problem:** Uses single year, which may be atypical
 
@@ -344,7 +344,7 @@ Output:
 
 ---
 
-### ⚠️ Issue 2: No Age Pattern Smoothing
+###  Issue 2: No Age Pattern Smoothing
 
 **Problem:** Empirical rates are noisy, especially for small populations
 
@@ -446,7 +446,7 @@ Result: Smooth curve, preserves total migration
 
 ---
 
-### ⚠️ Issue 3: No Age Heaping Correction
+###  Issue 3: No Age Heaping Correction
 
 **Problem:** In census/survey data, ages cluster at multiples of 5
 
@@ -510,7 +510,7 @@ def smooth_heaped_ages(rates: pd.DataFrame) -> pd.DataFrame:
 
 ---
 
-### ⚠️ Issue 4: Hardcoded Age Groups
+###  Issue 4: Hardcoded Age Groups
 
 **Problem:**
 ```python
@@ -577,7 +577,7 @@ df['EDAD'] = pd.Categorical(df['EDAD'], categories=edad_order, ordered=True)
 
 ---
 
-### ⚠️ Issue 5: No Validation
+###  Issue 5: No Validation
 
 **Problem:** Assumes specific input format, crashes if wrong
 
@@ -660,7 +660,7 @@ def create_migration_frame(conteos: pd.DataFrame, year: int = 2018,
 
 ### Integration Assessment
 
-**✅ What Works Well:**
+** What Works Well:**
 
 **1. Output Format**
 ```python
@@ -686,11 +686,11 @@ Where:
 - $S$ = Survival rate (from mortality.py)
 - $M$ = Net migrants (from migration.py)
 
-✓ **Mathematically consistent**
+ **Mathematically consistent**
 
 ---
 
-### ⚠️ Projection Assumptions
+###  Projection Assumptions
 
 **Typical projection workflow:**
 ```python
@@ -867,22 +867,22 @@ def project_with_migration_scenarios(
 
 ## Overall Verdict
 
-### Code Quality: ⭐⭐⭐⭐ (4/5)
+### Code Quality:  (4/5)
 - Clean, readable, well-structured
 - Robust data handling
 - Missing: validation, flexibility
 
-### Demographic Correctness: ⭐⭐⭐⭐⭐ (5/5)
+### Demographic Correctness:  (5/5)
 - Correct formulas (net migration, rates)
 - Age- and sex-specific (best practice)
 - Preserves gross flows (transparency)
 
-### Methodological Sophistication: ⭐⭐⭐ (3/5)
+### Methodological Sophistication:  (3/5)
 - Standard approach (rates by age-sex)
 - Missing: smoothing, scenarios, uncertainty
 - Adequate for basic projections, needs enhancement for publication
 
-### **Overall: ⭐⭐⭐⭐ (4/5 stars - Very Good)**
+### **Overall:  (4/5 stars - Very Good)**
 
 **Summary:** The core approach is **demographically sound** and follows best practices (age-sex-specific rates). The main limitation is **lack of temporal smoothing and scenario planning**, which are essential for multi-decade projections. The module does what it claims (process single-year migration data) correctly, but downstream use requires careful scenario design.
 
@@ -891,8 +891,8 @@ def project_with_migration_scenarios(
 2. **Before publication:** Add migration scenarios (UN-style)
 3. **Enhancement:** Add Rogers-Castro smoothing for small populations
 
-**For current use (single-year processing):** ✅ **Production-ready**  
-**For projection applications:** ⚠️ **Needs scenario framework**
+**For current use (single-year processing):**  **Production-ready**  
+**For projection applications:**  **Needs scenario framework**
 
 ---
 

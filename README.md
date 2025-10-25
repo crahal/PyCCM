@@ -1,16 +1,20 @@
 # PyCCM
 
 [![License: GNU GPL 3.0](https://img.shields.io/badge/License-GNUGPL3.0-green.svg)](#license)
-![Python](https://img.shields.io/badge/Python-3.10_|_3.11_|_3.12-blue)
+![Python](https://img.shields.io/badge/Python-3.7_|_3.8_|_3.9_|_3.10_|_3.11-blue)
+![Tests](https://img.shields.io/badge/Tests-211_passing-brightgreen)
+![Quality](https://img.shields.io/badge/Quality-4.7%2F5_stars-yellow)
 ![OS](https://img.shields.io/badge/OS-Linux_|_Windows_|_macOS-red)
 
-Population projection pipeline with single-year ages (“unabridged”) and joint parameter sweeps for fertility & mortality assumptions. Supports parallelized scenario runs and consolidated outputs (life tables, ASFR, Leslie matrices, projections).
+Population projection pipeline with single-year ages ("unabridged") and joint parameter sweeps for fertility & mortality assumptions. Supports parallelized scenario runs and consolidated outputs (life tables, ASFR, Leslie matrices, projections).
 
-> ✳️ **Repo name:** `PyCCM`  
-> 📁 **Entry point:** `src/main_compute.py`  
-> ⚙️ **Config:** `config.yaml` (root)  
-> 📦 **Data dir:** `data/` (CSV inputs)  
-> 📤 **Outputs:** `results_unabridged/` (default)
+> **Repo name:** `PyCCM`  
+> **Entry point:** `src/main_compute.py`  
+> **Config:** `config.yaml` (root)  
+> **Data dir:** `data/` (CSV inputs)  
+> **Outputs:** `results_unabridged/` (default)  
+> **Status:** Production Ready (211/211 tests passing)
+
 
 ---
 
@@ -25,6 +29,7 @@ Population projection pipeline with single-year ages (“unabridged”) and join
 - [Outputs](#outputs)
 - [Troubleshooting](#troubleshooting)
 - [Development](#development)
+- [Testing/Documentation Quick Links](#testingdocumentation-quick-links)
 - [Citation](#citation)
 - [License](#license)
 
@@ -178,10 +183,30 @@ During the run, scenarios may write to `_scenarios/<name>/` and are aggregated a
   Reduce range sizes, restrict `DEATH_CHOICES`, or increase `parallel.processes`.
 - **Missing input CSVs**  
   You’ll see warnings; the pipeline falls back to YAML defaults.
+ 
+---
+
+## Testing/Documentation Quick Links
+
+**Documentations:**
+- [docs/README.md](docs/README.md) - Complete documentation index
+- [TESTING_SUMMARY_QUICK.md](docs/tests/TESTING_SUMMARY_QUICK.md) - 1-page executive summary
+- [DOCUMENTATION_INDEX.md](docs/DOCUMENTATION_INDEX.md) - Central navigation hub
+
+**For Developers/QA:**
+- [COMPREHENSIVE_TESTING_REPORT.md](docs/tests/COMPREHENSIVE_TESTING_REPORT.md) - Full test analysis (25K words)
+- [docs/tests/README.md](docs/tests/README.md) - Test suite navigation
+- Run tests: `pytest tests/ -v`
+
+**For Demographers:**
+- Module assessments in `docs/modules/[module]/DEMOGRAPHIC_ASSESSMENT_*.md`
+
+
+**Quality Assurance:**
+- **211 tests** (100% passing)
+- **Python 3.7-3.11** compatibility verified
 
 ---
- 
-
 ## Citation
 
 If this work supports your research, please cite the repo:

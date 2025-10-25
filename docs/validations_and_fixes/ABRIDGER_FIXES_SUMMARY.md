@@ -1,7 +1,7 @@
 # Abridger Module Fixes Summary
 
 **Date:** October 21, 2025  
-**Status:** ✅ **All 46 tests passing** (was 36/46, now 46/46)
+**Status:**  **All 46 tests passing** (was 36/46, now 46/46)
 
 ---
 
@@ -16,7 +16,7 @@ Fixed all 10 failing tests in the abridger module by addressing:
 
 ## Fixes Applied
 
-### 1. **Fixed and Simplified `_geom_weights()` Algorithm** ✅
+### 1. **Fixed and Simplified `_geom_weights()` Algorithm** 
 
 **File:** `src/abridger.py`
 
@@ -52,9 +52,9 @@ def _geom_weights(bands: list[str], r: float) -> np.ndarray:
 - **Updated all call sites**: Removed `increasing=True/False` arguments
 
 **Tests Fixed:**
-- ✅ `test_decreasing_weights` - now correctly validates decreasing pattern
-- ✅ `test_splits_population_70_plus` - population distribution with decreasing weights
-- ✅ Updated all test calls to use simplified signature
+-  `test_decreasing_weights` - now correctly validates decreasing pattern
+-  `test_splits_population_70_plus` - population distribution with decreasing weights
+-  Updated all test calls to use simplified signature
 
 ---
 
@@ -67,7 +67,7 @@ def _geom_weights(bands: list[str], r: float) -> np.ndarray:
 - **Total:** 46 tests
 - **Passed:** 46 (100%)
 - **Failed:** 0 (0%)
-- **Status:** ✅ **All tests passing!**
+- **Status:**  **All tests passing!**
 
 ### Execution Time
 - **Duration:** 0.64 seconds
@@ -114,15 +114,15 @@ columns when determining the result dtypes.
 
 All demographic algorithms validated:
 
-✅ **Age parsing** (8 tests) - Correctly parses ranges, open-ended, single ages  
-✅ **Convention 2 collapsing** (3 tests) - Collapses adjacent ages correctly  
-✅ **Life table functions** (4 tests) - Survivorship and person-years calculations  
-✅ **Smoothing matrices** (6 tests) - Second-order differences and constraints  
-✅ **Infant adjustment** (5 tests) - Splits 0-4 age group appropriately  
-✅ **Unabridging** (8 tests) - Converts abridged to single-year ages  
-✅ **Geometric weights** (2 tests) - Correct increasing/decreasing patterns  
-✅ **Harmonization** (6 tests) - Migration and population tail splits  
-✅ **Integration** (4 tests) - Full unabridging workflow  
+ **Age parsing** (8 tests) - Correctly parses ranges, open-ended, single ages  
+ **Convention 2 collapsing** (3 tests) - Collapses adjacent ages correctly  
+ **Life table functions** (4 tests) - Survivorship and person-years calculations  
+ **Smoothing matrices** (6 tests) - Second-order differences and constraints  
+ **Infant adjustment** (5 tests) - Splits 0-4 age group appropriately  
+ **Unabridging** (8 tests) - Converts abridged to single-year ages  
+ **Geometric weights** (2 tests) - Correct increasing/decreasing patterns  
+ **Harmonization** (6 tests) - Migration and population tail splits  
+ **Integration** (4 tests) - Full unabridging workflow  
 
 ---
 
@@ -160,13 +160,13 @@ These patterns are **demographically realistic**:
 
 All abridger module issues resolved. The module now:
 
-✅ Correctly calculates geometric weights for population and death distributions  
-✅ Properly handles NaN values in age parsing  
-✅ Works with complete test fixtures including all required columns  
-✅ Passes all 46 tests with 100% success rate  
-✅ Produces demographically realistic age distributions  
+ Correctly calculates geometric weights for population and death distributions  
+ Properly handles NaN values in age parsing  
+ Works with complete test fixtures including all required columns  
+ Passes all 46 tests with 100% success rate  
+ Produces demographically realistic age distributions  
 
-**Status:** **Production-ready** ✅
+**Status:** **Production-ready** 
 
 The only remaining item is the pandas FutureWarning, which is non-critical and can be addressed in a future maintenance update.
 

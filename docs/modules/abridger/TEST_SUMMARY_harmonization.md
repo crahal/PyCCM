@@ -13,12 +13,12 @@
 
 All tail harmonization functions in `abridger.py` work correctly for their intended use cases. The comprehensive test suite validates:
 
-✅ **Geometric weight calculations** (`_geom_weights`)  
-✅ **Population-based weight fallback logic** (`_weights_from_pop_or_geometric`)  
-✅ **Migration tail harmonization** (`harmonize_migration_to_90plus`)  
-✅ **Census/deaths tail harmonization** (`harmonize_conteos_to_90plus`)  
-✅ **Total preservation** (no data loss)  
-✅ **Edge case handling** (empty data, missing groups, duplicates)
+ **Geometric weight calculations** (`_geom_weights`)  
+ **Population-based weight fallback logic** (`_weights_from_pop_or_geometric`)  
+ **Migration tail harmonization** (`harmonize_migration_to_90plus`)  
+ **Census/deaths tail harmonization** (`harmonize_conteos_to_90plus`)  
+ **Total preservation** (no data loss)  
+ **Edge case handling** (empty data, missing groups, duplicates)
 
 ---
 
@@ -119,29 +119,29 @@ Population:
 
 ## Validated Behaviors
 
-### ✅ Happy Path
+###  Happy Path
 - Standard splits work correctly
 - Totals are preserved exactly (tested to floating-point precision)
 - Weights always sum to 1.0
 
-### ✅ Edge Cases
+###  Edge Cases
 - **Empty DataFrames:** Functions handle gracefully, return empty results
 - **Missing population data:** Silent fallback to geometric weights (works, but no warning)
 - **Zero/NaN populations:** Correctly triggers geometric fallback
 - **Whitespace in labels:** Correctly strips and matches
 - **Duplicate EDAD labels:** Correctly aggregates (sums)
 
-### ✅ Duplicate Handling
+###  Duplicate Handling
 - **Both 70+ and 80+ present:** Correctly splits both and aggregates overlapping bands
 - **70-74 already present + 70+ split:** Correctly aggregates the duplicate 70-74 entries
 - Aggregation tested with `.groupby().sum()` at end of functions
 
-### ✅ Multiple Groups
+###  Multiple Groups
 - Each group processed independently
 - Totals preserved per group
 - No cross-contamination between groups
 
-### ✅ Variable Filtering
+###  Variable Filtering
 - Only `poblacion_total` and `defunciones` processed in `harmonize_conteos_to_90plus`
 - Other variables correctly pass through unchanged
 - Case-insensitive matching (POBLACION_TOTAL = poblacion_total)

@@ -16,12 +16,12 @@ This report documents the validation of the PyCCM demographic projection system'
 
 | Module | Tests | Passed | Failed | Pass Rate | Status |
 |--------|-------|--------|--------|-----------|---------|
-| **mortality.py** | 37 | 37 | 0 | 100% | ✅ Perfect |
-| **fertility.py** | 31 | 31 | 0 | 100% | ✅ Perfect |
-| **migration.py** | 24 | 24 | 0 | 100% | ✅ Perfect |
-| **main_compute.py** | 24 | 24 | 0 | 100% | ✅ Perfect |
-| **abridger.py** | 33 | 23 | 10 | 69.7% | ⚠️ Needs Review |
-| **TOTAL** | **149** | **139** | **10** | **93.3%** | ✅ Excellent |
+| **mortality.py** | 37 | 37 | 0 | 100% |  Perfect |
+| **fertility.py** | 31 | 31 | 0 | 100% |  Perfect |
+| **migration.py** | 24 | 24 | 0 | 100% |  Perfect |
+| **main_compute.py** | 24 | 24 | 0 | 100% |  Perfect |
+| **abridger.py** | 33 | 23 | 10 | 69.7% |  Needs Review |
+| **TOTAL** | **149** | **139** | **10** | **93.3%** |  Excellent |
 
 ---
 
@@ -29,9 +29,9 @@ This report documents the validation of the PyCCM demographic projection system'
 
 ### 1. Mortality Module (`test_mortality.py`)
 
-**Status:** ✅ **Perfect** — 37/37 tests passing (100%)  
+**Status:**  **Perfect** — 37/37 tests passing (100%)  
 **Execution Time:** 0.68s  
-**Demographic Rating:** ⭐⭐⭐⭐⭐ (5/5 - State-of-the-art)
+**Demographic Rating:**  (5/5 - State-of-the-art)
 
 #### Test Coverage
 - **Age Label Parsing** (4 tests): Standard intervals, open intervals, single-year, irregular
@@ -43,11 +43,11 @@ This report documents the validation of the PyCCM demographic projection system'
 - **Integration Tests** (3 tests): Full workflows without smoothing, with P-spline, comparison of smoothing methods
 
 #### Key Validations
-✅ P-spline smoothing correctly handles noisy mortality data  
-✅ Life expectancy calculations produce reasonable values (65-85 years)  
-✅ Survivorship is monotonically decreasing  
-✅ Coale-Demeny ax approximations correctly applied  
-✅ Convergence achieved in iterative P-spline fitting  
+ P-spline smoothing correctly handles noisy mortality data  
+ Life expectancy calculations produce reasonable values (65-85 years)  
+ Survivorship is monotonically decreasing  
+ Coale-Demeny ax approximations correctly applied  
+ Convergence achieved in iterative P-spline fitting  
 
 #### Notes
 - No warnings or deprecations
@@ -58,9 +58,9 @@ This report documents the validation of the PyCCM demographic projection system'
 
 ### 2. Fertility Module (`test_fertility.py`)
 
-**Status:** ✅ **Perfect** — 31/31 tests passing (100%)  
+**Status:**  **Perfect** — 31/31 tests passing (100%)  
 **Execution Time:** 0.57s  
-**Demographic Rating:** ⭐⭐⭐⭐½ (4.5/5 - Excellent)
+**Demographic Rating:** ½ (4.5/5 - Excellent)
 
 #### Test Coverage
 - **Target Parameter Loading** (12 tests): Standard format, convergence years, flexible column names, whitespace handling, invalid TFR values, NaN/inf handling, missing columns, alternative column detection, empty CSV, real file example
@@ -68,11 +68,11 @@ This report documents the validation of the PyCCM demographic projection system'
 - **Integration Tests** (2 tests): Full workflow with target params, TFR calculation from ASFR
 
 #### Key Validations
-✅ ASFR calculated correctly from births and female population  
-✅ Age alignment robust to whitespace and label variations  
-✅ Zero/negative value handling appropriate  
-✅ TFR summation accurate across age groups  
-✅ CSV parameter loading flexible and error-tolerant  
+ ASFR calculated correctly from births and female population  
+ Age alignment robust to whitespace and label variations  
+ Zero/negative value handling appropriate  
+ TFR summation accurate across age groups  
+ CSV parameter loading flexible and error-tolerant  
 
 #### Notes
 - No warnings or deprecations
@@ -83,9 +83,9 @@ This report documents the validation of the PyCCM demographic projection system'
 
 ### 3. Migration Module (`test_migration.py`)
 
-**Status:** ✅ **Perfect** — 24/24 tests passing (100%)  
+**Status:**  **Perfect** — 24/24 tests passing (100%)  
 **Execution Time:** 0.72s  
-**Demographic Rating:** ⭐⭐⭐⭐ (4/5 - Very Good)
+**Demographic Rating:**  (4/5 - Very Good)
 
 #### Test Coverage
 - **Basic Functionality** (6 tests): Structure, national aggregation, immigration/emigration aggregation, net migration calculation, net migration rate calculation
@@ -98,14 +98,14 @@ This report documents the validation of the PyCCM demographic projection system'
 - **Integration** (2 tests): Full workflow, use in projection
 
 #### Key Validations
-✅ Immigration and emigration correctly separated  
-✅ Net migration = immigration - emigration  
-✅ Migration rates calculated as proportion of population  
-✅ Age patterns show expected young adult peak  
-✅ Handles zero population gracefully  
+ Immigration and emigration correctly separated  
+ Net migration = immigration - emigration  
+ Migration rates calculated as proportion of population  
+ Age patterns show expected young adult peak  
+ Handles zero population gracefully  
 
 #### Warnings
-⚠️ 1 deprecation warning: `is_categorical_dtype` deprecated (pandas future version)
+ 1 deprecation warning: `is_categorical_dtype` deprecated (pandas future version)
 - **Impact:** Low - easy to fix with `isinstance(dtype, pd.CategoricalDtype)`
 - **Recommendation:** Update to modern pandas API in future revision
 
@@ -113,9 +113,9 @@ This report documents the validation of the PyCCM demographic projection system'
 
 ### 4. Main Compute Module (`test_main_compute_simplified.py`)
 
-**Status:** ✅ **Perfect** — 24/24 tests passing (100%)  
+**Status:**  **Perfect** — 24/24 tests passing (100%)  
 **Execution Time:** 16.04s  
-**Demographic Rating:** ⭐⭐⭐⭐½ (4.5/5 - Excellent)
+**Demographic Rating:** ½ (4.5/5 - Excellent)
 
 #### Test Coverage
 - **Percent Coercion** (6 tests): String with percent sign, decimal string, assumes >1 is percentage, handles None/empty, caps at max, rejects negative
@@ -127,12 +127,12 @@ This report documents the validation of the PyCCM demographic projection system'
 - **Mortality Integration** (2 tests): Factor scales death rates correctly, logistic vs exponential comparison
 
 #### Key Validations
-✅ CSV parsing handles percent signs and decimal strings  
-✅ Mortality improvements calculated correctly (exponential & logistic)  
-✅ Parameter sweeps generate inclusive ranges  
-✅ Cartesian product produces all scenario combinations  
-✅ Seeds reproducible from scenario labels  
-✅ Integration with mortality module works correctly  
+ CSV parsing handles percent signs and decimal strings  
+ Mortality improvements calculated correctly (exponential & logistic)  
+ Parameter sweeps generate inclusive ranges  
+ Cartesian product produces all scenario combinations  
+ Seeds reproducible from scenario labels  
+ Integration with mortality module works correctly  
 
 #### Notes
 - Longer execution time (16s) due to full projection runs
@@ -143,25 +143,25 @@ This report documents the validation of the PyCCM demographic projection system'
 
 ### 5. Abridger Module (`test_abridger.py`)
 
-**Status:** ⚠️ **Needs Review** — 33 tests created, 23/33 passed (69.7%), 10 failed  
+**Status:**  **Needs Review** — 33 tests created, 23/33 passed (69.7%), 10 failed  
 **Execution Time:** 1.72s  
-**Demographic Rating:** ⭐⭐⭐⭐ (4/5 - Very Good)
+**Demographic Rating:**  (4/5 - Very Good)
 
 #### Test Coverage
-- **Parse Edad** (8 tests): Range parsing, spaces, reversed ranges, open-ended, single age, None/NaN, invalid ✅ ALL PASSED
-- **Collapse Convention** (3 tests): Adjacent ages, non-adjacent preservation, NaN handling — ⚠️ 1 FAILED
-- **Life Table Functions** (4 tests): Default survivorship, nLx 1-year, weights from nLx, empty L handling ✅ ALL PASSED
-- **Second Diff Matrix** (3 tests): Shape, values, small n ✅ ALL PASSED
-- **Solve Smooth** (3 tests): Satisfies constraints, multiple constraints, smoothness preference ✅ ALL PASSED
-- **Apply Infant Adjustment** (5 tests): Non-population passthrough, splits 0-4 with age 0, without age 0, splits 1-4, preserves total ✅ ALL PASSED
-- **Unabridge One Group** (3 tests): Simple unabridging, preserves total, empty group ✅ ALL PASSED
-- **Unabridge Df** (2 tests): Multiple groups, passthrough open-ended — ⚠️ 2 FAILED
-- **Weights Selection** (2 tests): Uses population when available, geometric fallback ✅ 1 PASSED, 1 FAILED
-- **Harmonize Migration** (3 tests): Splits 70+, splits 80+, preserves other ages — ⚠️ 3 FAILED
-- **Harmonize Conteos** (3 tests): Splits population 70+, splits deaths 80+, passthrough non-target — ⚠️ 1 FAILED, 2 PASSED
-- **Unabridge All** (2 tests): All datasets, correct value columns — ⚠️ 2 FAILED
-- **Save Unabridged** (2 tests): Saves to CSV, creates directory ✅ ALL PASSED
-- **Series Keys** (1 test): Has expected keys ✅ PASSED
+- **Parse Edad** (8 tests): Range parsing, spaces, reversed ranges, open-ended, single age, None/NaN, invalid  ALL PASSED
+- **Collapse Convention** (3 tests): Adjacent ages, non-adjacent preservation, NaN handling —  1 FAILED
+- **Life Table Functions** (4 tests): Default survivorship, nLx 1-year, weights from nLx, empty L handling  ALL PASSED
+- **Second Diff Matrix** (3 tests): Shape, values, small n  ALL PASSED
+- **Solve Smooth** (3 tests): Satisfies constraints, multiple constraints, smoothness preference  ALL PASSED
+- **Apply Infant Adjustment** (5 tests): Non-population passthrough, splits 0-4 with age 0, without age 0, splits 1-4, preserves total  ALL PASSED
+- **Unabridge One Group** (3 tests): Simple unabridging, preserves total, empty group  ALL PASSED
+- **Unabridge Df** (2 tests): Multiple groups, passthrough open-ended —  2 FAILED
+- **Weights Selection** (2 tests): Uses population when available, geometric fallback  1 PASSED, 1 FAILED
+- **Harmonize Migration** (3 tests): Splits 70+, splits 80+, preserves other ages —  3 FAILED
+- **Harmonize Conteos** (3 tests): Splits population 70+, splits deaths 80+, passthrough non-target —  1 FAILED, 2 PASSED
+- **Unabridge All** (2 tests): All datasets, correct value columns —  2 FAILED
+- **Save Unabridged** (2 tests): Saves to CSV, creates directory  ALL PASSED
+- **Series Keys** (1 test): Has expected keys  PASSED
 
 #### Failures Analysis
 
@@ -287,11 +287,11 @@ Python: 3.11.13
 
 | Aspect | Python 3.7.3 | Python 3.11.13 | Change |
 |--------|--------------|----------------|---------|
-| **Type hints** | Old syntax failed | New syntax works | ✅ Fixed |
-| **pytest** | Not installed | 8.4.2 installed | ✅ Added |
-| **Performance** | Slower | Faster (~15-25% faster) | ✅ Improved |
-| **Warnings** | More deprecations | Fewer (modern APIs) | ✅ Better |
-| **Test pass rate** | N/A (couldn't run) | 93.3% (139/149) | ✅ Validated |
+| **Type hints** | Old syntax failed | New syntax works |  Fixed |
+| **pytest** | Not installed | 8.4.2 installed |  Added |
+| **Performance** | Slower | Faster (~15-25% faster) |  Improved |
+| **Warnings** | More deprecations | Fewer (modern APIs) |  Better |
+| **Test pass rate** | N/A (couldn't run) | 93.3% (139/149) |  Validated |
 
 ---
 
@@ -365,18 +365,18 @@ Python: 3.11.13
 
 The PyCCM test suite demonstrates **excellent quality** with a 93.3% pass rate in Python 3.11.13. The 4 core demographic modules (mortality, fertility, migration, main_compute) achieve **100% test success**, validating the correctness of:
 
-✅ Cohort-component projection methodology  
-✅ Life table construction and smoothing  
-✅ Age-specific fertility rate calculations  
-✅ Migration flow processing  
-✅ Parameter sweep orchestration  
-✅ Mortality improvement extrapolation  
+ Cohort-component projection methodology  
+ Life table construction and smoothing  
+ Age-specific fertility rate calculations  
+ Migration flow processing  
+ Parameter sweep orchestration  
+ Mortality improvement extrapolation  
 
 The 10 failures in the abridger module are **test infrastructure issues** (missing columns, fixture problems) rather than algorithmic errors. The core abridger logic (parsing, smoothing, unabridging) passes all 18 relevant tests.
 
-**Validation Status:** ✅ **PASSED** — System is production-ready in Python 3.11.13
+**Validation Status:**  **PASSED** — System is production-ready in Python 3.11.13
 
-**Confidence Level:** ⭐⭐⭐⭐½ (4.5/5) — Very High  
+**Confidence Level:** ½ (4.5/5) — Very High  
 (Would be 5/5 after fixing abridger test fixtures)
 
 ---

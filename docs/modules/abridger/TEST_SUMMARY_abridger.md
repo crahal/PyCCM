@@ -156,12 +156,12 @@ Given age bins with totals, find single-year estimates x that:
 ## Test Suite Results
 
 ### Test Coverage: 46 tests total
-- ✅ **36 tests passing** (78%)
-- ❌ **10 tests failing** (22%)
+-  **36 tests passing** (78%)
+-  **10 tests failing** (22%)
 
 ### Passing Test Categories
 
-#### Age Parsing (8/8 tests) ✅
+#### Age Parsing (8/8 tests) 
 - Range parsing ("0-4", "15-19")
 - Open-ended parsing ("80+")
 - Single age parsing ("5")
@@ -169,47 +169,47 @@ Given age bins with totals, find single-year estimates x that:
 - Whitespace handling
 - Reversed ranges
 
-#### Convention 2 Collapsing (2/3 tests) ✅
+#### Convention 2 Collapsing (2/3 tests) 
 - Adjacent age collapsing (a-(a+1) → a)
 - Non-adjacent preservation
 
-#### Life Table Functions (4/4 tests) ✅
+#### Life Table Functions (4/4 tests) 
 - Default survivorship generation
 - Person-years (nLx) calculation
 - Weight normalization
 - Missing data fallback
 
-#### Second Difference Matrix (3/3 tests) ✅
+#### Second Difference Matrix (3/3 tests) 
 - Matrix shape validation
 - Coefficient correctness
 - Edge cases (n < 3)
 
-#### Smoothing Solver (3/3 tests) ✅
+#### Smoothing Solver (3/3 tests) 
 - Constraint satisfaction
 - Multiple constraints
 - Smoothness preference
 
-#### Infant Adjustment (5/5 tests) ✅
+#### Infant Adjustment (5/5 tests) 
 - Non-population passthrough
 - 0-4 splitting with age 0 present
 - 0-4 splitting without age 0
 - 1-4 splitting
 - Total preservation
 
-#### One-Group Unabridging (3/3 tests) ✅
+#### One-Group Unabridging (3/3 tests) 
 - Simple unabridging
 - Total preservation
 - Empty group handling
 
-#### Weight Functions (2/2 tests) ✅
+#### Weight Functions (2/2 tests) 
 - Population-based weights
 - Geometric fallback
 
-#### Tail Harmonization Conteos (2/3 tests) ✅
+#### Tail Harmonization Conteos (2/3 tests) 
 - Deaths 80+ splitting (increasing pattern)
 - Non-target variable passthrough
 
-#### Utility Functions (3/3 tests) ✅
+#### Utility Functions (3/3 tests) 
 - CSV saving
 - Directory creation
 - Default constants

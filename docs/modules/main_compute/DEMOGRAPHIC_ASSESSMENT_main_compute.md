@@ -2,7 +2,7 @@
 
 **Date:** October 20, 2025  
 **Reviewer Perspective:** Demographic Methodology & System Architecture  
-**Overall Assessment:** ⭐⭐⭐⭐½ (4.5/5 stars - Excellent with minor areas for refinement)
+**Overall Assessment:** ½ (4.5/5 stars - Excellent with minor areas for refinement)
 
 ---
 
@@ -10,7 +10,7 @@
 
 `main_compute.py` is the **orchestration engine** for a sophisticated cohort-component population projection system. It integrates all demographic modules (mortality, fertility, migration, age disaggregation) into a unified pipeline with **parameter sweep capabilities** and **uncertainty quantification**. The system implements demographic best practices while providing exceptional flexibility for sensitivity analysis and policy scenario modeling.
 
-### ✅ Strengths
+###  Strengths
 1. **Demographically sound integration** of all projection components
 2. **Flexible parameter sweep framework** (Cartesian product over TFR × mortality × smoothing)
 3. **Robust mortality improvement extrapolation** (exponential & logistic smoothers)
@@ -18,7 +18,7 @@
 5. **Uncertainty quantification support** (Monte Carlo draws)
 6. **Efficient computation** (parallel execution, I/O suppression)
 
-### ⚠️ Areas for Improvement
+###  Areas for Improvement
 1. **No coherence checks** between fertility and mortality scenarios
 2. **Limited migration scenario options** (constant rates only)
 3. **No consistency diagnostics** (national ≠ sum of departments warnings)
@@ -31,7 +31,7 @@
 
 ## 1. Cohort-Component Model Implementation
 
-### ✅ Correct Integration
+###  Correct Integration
 
 **Balancing equation:**
 $$P(a, s, t+n) = P(a-n, s, t) \times S(a-n, s, t) + M(a, s, t)$$
@@ -62,7 +62,7 @@ L_MM, L_MF, L_FF, pop_M, pop_F, pop_T = make_projections(
 )
 ```
 
-✓ **All components present and correctly ordered**
+ **All components present and correctly ordered**
 
 ---
 
@@ -78,10 +78,10 @@ mort_factor = _mortality_factor_for_year(year, DPTO)
 ```
 
 **Demographic validity:**
-- ✅ Sex-specific survival probabilities
-- ✅ Age-specific (from life tables)
-- ✅ Time-varying (improvements extrapolated)
-- ✅ Department-specific (CSV overrides)
+-  Sex-specific survival probabilities
+-  Age-specific (from life tables)
+-  Time-varying (improvements extrapolated)
+-  Department-specific (CSV overrides)
 
 **Minor issue:** No correlation between male and female improvement rates. In reality, if male mortality improves due to health policy, female mortality likely improves too.
 
@@ -104,10 +104,10 @@ asfr_projected = w * TFR_t  # Scale to target
 ```
 
 **Demographic validity:**
-- ✅ Age-specific fertility (preserves age pattern)
-- ✅ Smooth convergence to target TFR
-- ✅ Department-specific targets (CSV)
-- ✅ National target = weighted average of departments (consistent)
+-  Age-specific fertility (preserves age pattern)
+-  Smooth convergence to target TFR
+-  Department-specific targets (CSV)
+-  National target = weighted average of departments (consistent)
 
 **Strengths:**
 - **Realistic age patterns:** Preserves observed peak at 25-29
@@ -134,9 +134,9 @@ exposure = pop_start + (net_dept * PERIOD_YEARS / 2.0)
 ```
 
 **Demographic validity:**
-- ✅ Age-specific net migration
-- ✅ Department-to-national scaling (proportional)
-- ✅ Mid-period adjustment to exposures (standard practice)
+-  Age-specific net migration
+-  Department-to-national scaling (proportional)
+-  Mid-period adjustment to exposures (standard practice)
 
 **Major limitation:** **Constant migration rates** (uses single year, no trends).
 
@@ -144,7 +144,7 @@ exposure = pop_start + (net_dept * PERIOD_YEARS / 2.0)
 
 ---
 
-### ⚠️ Issue 1: No Migration Scenarios
+###  Issue 1: No Migration Scenarios
 
 **Current:** Uses latest observed year (e.g., 2018) for entire projection.
 
@@ -219,7 +219,7 @@ for mig_name, (imi_scen, emi_scen) in mig_scenarios.items():
 
 ---
 
-### ⚠️ Issue 2: No Fertility-Mortality Coherence
+###  Issue 2: No Fertility-Mortality Coherence
 
 **Problem:** Fertility and mortality scenarios are independent.
 
@@ -280,7 +280,7 @@ for (tfr, mort, ma_win) in param_combos:
 
 ---
 
-### ⚠️ Issue 3: No Consistency Checks
+###  Issue 3: No Consistency Checks
 
 **Problem:** National totals may not equal sum of departments.
 
@@ -354,7 +354,7 @@ for year in [START_YEAR, 2030, 2050, END_YEAR]:
 
 ## 2. Mortality Improvement Methodology
 
-### ✅ Sophisticated Approach
+###  Sophisticated Approach
 
 **Two smoother options:**
 
@@ -368,10 +368,10 @@ $$S(t) = \frac{1}{1 + e^{-s(t/T - m)}}$$
 $$m_x(t) = m_x(0) \times e^{-G \cdot S(t)}$$
 
 **Demographic assessment:**
-- ✅ **Realistic trajectories:** Gradual, not instant
-- ✅ **Flexible:** Exponential (smooth) vs logistic (S-curve)
-- ✅ **Parameterized:** Department-specific rates via CSV
-- ✅ **Long-run target:** 5-20% reduction over 50 years (typical)
+-  **Realistic trajectories:** Gradual, not instant
+-  **Flexible:** Exponential (smooth) vs logistic (S-curve)
+-  **Parameterized:** Department-specific rates via CSV
+-  **Long-run target:** 5-20% reduction over 50 years (typical)
 
 ---
 
@@ -395,7 +395,7 @@ $$m_x(t) = m_x(0) \times e^{-G \cdot S(t)}$$
 
 ---
 
-### ⚠️ Issue 4: No Historical Trend Calibration
+###  Issue 4: No Historical Trend Calibration
 
 **Problem:** Improvement rates are user-specified, not calibrated to data.
 
@@ -492,7 +492,7 @@ for DPTO in departments:
 
 ## 3. Parameter Sweep Design
 
-### ✅ Excellent Design
+###  Excellent Design
 
 **Cartesian product:**
 ```python
@@ -510,7 +510,7 @@ combos = product(tfr_values, mort_values, ma_values)  # 132 combinations
 
 ---
 
-### ⚠️ Issue 5: No Sensitivity Summary
+###  Issue 5: No Sensitivity Summary
 
 **Problem:** Users get 132 × N scenarios but no guidance on which matter.
 
@@ -591,7 +591,7 @@ Recommendation: Focus scenario analysis on fertility assumptions.
 
 ## 4. Computational Efficiency
 
-### ✅ Excellent Optimization
+###  Excellent Optimization
 
 **Performance features:**
 1. **I/O suppression:** Skip intermediate file writes (100× speedup)
@@ -652,7 +652,7 @@ TFR_array = _smooth_tfr_vectorized(TFR0, TFR_TARGET, conv_years, steps_array)
 
 ## 5. Validation & Quality Assurance
 
-### ⚠️ Issue 6: No External Validation
+###  Issue 6: No External Validation
 
 **Problem:** No comparison to authoritative projections (UN, World Bank, national statistical offices).
 
@@ -754,7 +754,7 @@ Possible causes:
 
 ## 6. User Experience & Transparency
 
-### ✅ Excellent Diagnostic Output
+###  Excellent Diagnostic Output
 
 **Startup diagnostics:**
 ```
@@ -868,31 +868,31 @@ param_log.to_csv(os.path.join(PATHS['results_dir'], 'parameter_sweep_log.csv'), 
 
 ## Overall Verdict
 
-### Code Quality: ⭐⭐⭐⭐⭐ (5/5)
+### Code Quality:  (5/5)
 - Clean architecture (modular, well-organized)
 - Excellent documentation (comments, diagnostics)
 - Efficient computation (parallel, optimized I/O)
 - Robust error handling (validation, fallbacks)
 
-### Demographic Correctness: ⭐⭐⭐⭐⭐ (5/5)
+### Demographic Correctness:  (5/5)
 - Correct cohort-component implementation
 - All components properly integrated (mortality, fertility, migration)
 - Sophisticated mortality extrapolation (exponential & logistic)
 - Realistic age-sex-specific rates
 
-### Methodological Completeness: ⭐⭐⭐⭐ (4/5)
+### Methodological Completeness:  (4/5)
 - Excellent parameter sweep framework
 - Missing: Migration scenarios (critical for Colombia context)
 - Missing: Coherence checks (fertility-mortality)
 - Missing: External validation benchmarks
 
-### User Experience: ⭐⭐⭐⭐½ (4.5/5)
+### User Experience: ½ (4.5/5)
 - Transparent diagnostics (startup, progress, output)
 - Flexible configuration (YAML + CSV overrides)
 - Missing: Sensitivity summary (which parameters matter?)
 - Missing: Validation reports (compare to UN/World Bank)
 
-### **Overall: ⭐⭐⭐⭐½ (4.5/5 stars - Excellent)**
+### **Overall: ½ (4.5/5 stars - Excellent)**
 
 **Summary:** This is a **state-of-the-art cohort-component projection system** with exceptional flexibility for sensitivity analysis and scenario modeling. The demographic methodology is sound, and the computational implementation is highly efficient. The main limitation is **lack of migration scenario support**, which is critical given Colombia's recent experience with the Venezuela crisis. With the addition of migration scenarios and sensitivity diagnostics, this would be **publication-ready for academic journals or policy use**.
 
@@ -901,9 +901,9 @@ param_log.to_csv(os.path.join(PATHS['results_dir'], 'parameter_sweep_log.csv'), 
 2. **Before publication:** Add sensitivity analysis (Issue #5) + external validation (Issue #6)
 3. **Enhancement:** Add coherence checks (Issue #2) + consistency diagnostics (Issue #3)
 
-**For current use (parameter sweeps):** ✅ **Production-ready**  
-**For policy publication:** ⚠️ **Needs migration scenarios**  
-**For academic publication:** ⚠️ **Needs migration scenarios + external validation**
+**For current use (parameter sweeps):**  **Production-ready**  
+**For policy publication:**  **Needs migration scenarios**  
+**For academic publication:**  **Needs migration scenarios + external validation**
 
 ---
 

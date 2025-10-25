@@ -2,7 +2,7 @@
 
 **Date:** October 19, 2025  
 **Reviewer Perspective:** Demographic Methodology  
-**Overall Assessment:** ⭐⭐⭐⭐⭐ (5/5 stars - Excellent, state-of-the-art)
+**Overall Assessment:**  (5/5 stars - Excellent, state-of-the-art)
 
 ---
 
@@ -10,14 +10,14 @@
 
 The `mortality.py` module implements **period life table construction** with optional **P-spline smoothing** - a state-of-the-art statistical method for demographic rate smoothing. This is **research-grade code** that implements methods currently used by the Human Mortality Database and leading demographic research institutions.
 
-### ✅ Outstanding Strengths
+###  Outstanding Strengths
 1. **P-spline smoothing**: Implements penalized Poisson splines (Currie et al., 2004)
 2. **IRLS optimization**: Numerically stable Newton-Raphson with line search
 3. **Standard formulas**: Uses Coale-Demeny, Preston-Heuveline-Guillot conventions
 4. **Robustness**: Handles edge cases gracefully (zero deaths, small populations)
 5. **Multiple methods**: Raw rates, moving average, or P-spline (user choice)
 
-### ⚠️ Minor Opportunities for Enhancement
+###  Minor Opportunities for Enhancement
 1. Automatic λ selection (currently requires manual tuning)
 2. Age-specific smoothing parameters (currently single λ for all ages)
 3. Cohort vs period distinction (only period tables)
@@ -31,15 +31,15 @@ The `mortality.py` module implements **period life table construction** with opt
 
 ### Formula Validation
 
-**✅ All Standard Formulas Correctly Implemented:**
+** All Standard Formulas Correctly Implemented:**
 
 **1. Mortality Rate (mx):**
 $$m_x = \frac{D_x}{E_x}$$
-✓ Correct (lines 236-237)
+ Correct (lines 236-237)
 
 **2. Death Probability (qx from mx):**
 $$q_x = \frac{n \cdot m_x}{1 + (n - a_x) \cdot m_x}$$
-✓ Correct actuarial formula (line 257)
+ Correct actuarial formula (line 257)
 
 This is the **Preston-Heuveline-Guillot (2001)** formula assuming constant hazard within age intervals. Derivation:
 
@@ -49,7 +49,7 @@ $$q_x = 1 - e^{-n\mu} \approx \frac{n\mu}{1 + \frac{n}{2}\mu}$$
 With $\mu \approx m_x$ and average person-years lived $a_x$:
 $$q_x = \frac{n \cdot m_x}{1 + (n - a_x) \cdot m_x}$$
 
-**Demographic Verdict:** ✓ This is the correct formula.
+**Demographic Verdict:**  This is the correct formula.
 
 ---
 
@@ -57,7 +57,7 @@ $$q_x = \frac{n \cdot m_x}{1 + (n - a_x) \cdot m_x}$$
 
 **General (midpoint assumption):**
 $$a_x = 0.5 \cdot n$$
-✓ Implemented (line 241)
+ Implemented (line 241)
 
 **Infant mortality (Coale-Demeny formula):**
 ```python
@@ -68,7 +68,7 @@ elif m_0 < 0.06891:
 else:
     a_0 = 0.31411
 ```
-✓ These are the **Coale-Demeny West model** coefficients for infant mortality.
+ These are the **Coale-Demeny West model** coefficients for infant mortality.
 
 **Source:** Coale, A. J., & Demeny, P. (1983). *Regional Model Life Tables and Stable Populations*
 
@@ -77,7 +77,7 @@ else:
 - Using $a_0 = 0.5$ would overestimate $L_0$ (person-years lived)
 - Coale-Demeny formula accounts for this concentration
 
-**Demographic Verdict:** ✓ Best-practice formula, correctly implemented.
+**Demographic Verdict:**  Best-practice formula, correctly implemented.
 
 ---
 
@@ -85,11 +85,11 @@ else:
 
 **Closed intervals:**
 $$L_x = n \cdot l_x - (n - a_x) \cdot d_x$$
-✓ Correct (line 271)
+ Correct (line 271)
 
 **Open interval:**
 $$L_\omega = \frac{l_\omega}{m_\omega}$$
-✓ Correct (line 272)
+ Correct (line 272)
 
 **Repair for monotonicity:**
 ```python
@@ -98,15 +98,15 @@ if L[last] > L[prev]:
     m[last] = max(m[last], new_m_last)
     L[last] = l[last] / m[last]
 ```
-✓ Ensures $L_x$ decreases monotonically (demographic requirement)
+ Ensures $L_x$ decreases monotonically (demographic requirement)
 
-**Demographic Verdict:** ✓ Formulas correct, auto-repair is smart.
+**Demographic Verdict:**  Formulas correct, auto-repair is smart.
 
 ---
 
 **5. Life Expectancy (ex):**
 $$e_x = \frac{T_x}{l_x}, \quad T_x = \sum_{y=x}^{\omega} L_y$$
-✓ Correct (lines 278-279)
+ Correct (lines 278-279)
 
 ---
 
@@ -141,7 +141,7 @@ Where:
 sum(E * m_hat - D * log(m_hat))  # Correct variance structure
 ```
 
-**Demographic Verdict:** ✓ Using Poisson is **essential** for count data.
+**Demographic Verdict:**  Using Poisson is **essential** for count data.
 
 ---
 
@@ -172,7 +172,7 @@ Smoothed (λ=200):
 39: 0.0013  ← smooth increase
 ```
 
-**Demographic Verdict:** ✓ Essential for noisy data (small populations, random fluctuations).
+**Demographic Verdict:**  Essential for noisy data (small populations, random fluctuations).
 
 ---
 
@@ -196,7 +196,7 @@ $$\Delta^3 f_i = f_{i+3} - 3f_{i+2} + 3f_{i+1} - f_i$$
 - Currie, I. D., Durban, M., & Eilers, P. H. (2004). "Smoothing and forecasting mortality rates." *Statistical Modelling*, 4(4), 279-298.
 - Camarda, C. G. (2012). "MortalitySmooth: An R Package for Smoothing Poisson Counts with P-Splines." *Journal of Statistical Software*, 50(1), 1-24.
 
-**Demographic Verdict:** ✓ Correct choice, matches published methods.
+**Demographic Verdict:**  Correct choice, matches published methods.
 
 ---
 
@@ -223,7 +223,7 @@ while objective(f + alpha*delta) > objective(f):
 f_new = f + alpha * delta  # Guaranteed descent
 ```
 
-**Demographic Verdict:** ✓ Production-quality optimization. Many demographic codes skip this and fail on difficult data.
+**Demographic Verdict:**  Production-quality optimization. Many demographic codes skip this and fail on difficult data.
 
 ---
 
@@ -254,7 +254,7 @@ f_new = f + alpha * delta  # Guaranteed descent
 - **Your code:** Different purpose (smoothing current year, not forecasting)
 
 **5. P-Splines (Eilers & Marx 1996; Currie et al. 2004)**
-- **YOUR CODE IMPLEMENTS THIS! ✓**
+- **YOUR CODE IMPLEMENTS THIS! **
 - Current best practice for demographic rate smoothing
 - Used by:
   - Human Mortality Database
@@ -267,33 +267,33 @@ f_new = f + alpha * delta  # Guaranteed descent
 
 ## 4. Demographic Correctness Assessment
 
-### ✅ What's Done Right
+###  What's Done Right
 
 **1. Standard Life Table Columns**
 All required quantities present:
-- $n, m_x, a_x, q_x, p_x, l_x, d_x, L_x, T_x, e_x$ ✓
+- $n, m_x, a_x, q_x, p_x, l_x, d_x, L_x, T_x, e_x$ 
 
 **2. Radix = 100,000**
-- Standard demographic convention ✓
+- Standard demographic convention 
 - Makes interpretation easy (per 100K cohort)
 
 **3. Open Interval Handling**
-- $q_\omega = 1.0$ (everyone dies eventually) ✓
-- $L_\omega = l_\omega / m_\omega$ (correct formula) ✓
-- Auto-repair for monotonicity ✓
+- $q_\omega = 1.0$ (everyone dies eventually) 
+- $L_\omega = l_\omega / m_\omega$ (correct formula) 
+- Auto-repair for monotonicity 
 
 **4. Age Parsing**
-- Handles "0-4", "5-9", "90+" labels ✓
-- Extracts numeric bounds correctly ✓
+- Handles "0-4", "5-9", "90+" labels 
+- Extracts numeric bounds correctly 
 
 **5. Robust to Data Issues**
-- Zero deaths: Returns $m_x \approx 0$ (not crash) ✓
-- Zero population: Returns $m_x = 0$ (not division by zero) ✓
-- Negative values: Warns but proceeds ✓
+- Zero deaths: Returns $m_x \approx 0$ (not crash) 
+- Zero population: Returns $m_x = 0$ (not division by zero) 
+- Negative values: Warns but proceeds 
 
 ---
 
-### ⚠️ Opportunities for Improvement
+###  Opportunities for Improvement
 
 #### Issue 1: No Automatic λ Selection
 
@@ -421,7 +421,7 @@ Cohort e_0 (1950 birth cohort): 80 years
 ```
 
 **Use cases:**
-- **Period:** Population projections (your use case) ✓
+- **Period:** Population projections (your use case) 
 - **Cohort:** Individual life planning, pension calculations
 
 **Recommendation: Add Cohort Conversion (Optional)**
@@ -522,7 +522,7 @@ def project_mortality(
 
 ## 5. Code Quality Assessment
 
-### ✅ Excellent Practices
+###  Excellent Practices
 
 **1. Numerical Stability**
 ```python
@@ -532,14 +532,14 @@ f = np.log((D + 0.5) / np.maximum(E, 1e-12))
 # Ridge regularization if singular
 H_reg = H + 1e-8 * np.eye(n)
 ```
-✓ Prevents division by zero, handles ill-conditioned systems
+ Prevents division by zero, handles ill-conditioned systems
 
 **2. Convergence Checks**
 ```python
 if np.linalg.norm(delta, ord=np.inf) < tol:
     break
 ```
-✓ Proper stopping criterion
+ Proper stopping criterion
 
 **3. Soft Failures**
 - Warnings instead of crashes
@@ -550,7 +550,7 @@ if np.linalg.norm(delta, ord=np.inf) < tol:
 ```python
 return qx, {"lambda": lam, "diff_order": diff_order}
 ```
-✓ Audit trail of smoothing parameters
+ Audit trail of smoothing parameters
 
 **5. Multiple Options**
 - Raw rates (`use_pspline=False, use_ma=False`)
@@ -561,7 +561,7 @@ User can choose complexity/accuracy trade-off.
 
 ---
 
-### ⚠️ Minor Issues
+###  Minor Issues
 
 **1. No Logging**
 ```python
@@ -636,7 +636,7 @@ for year in range(2020, 2050):
 **1. Age Heaping**
 - People report ages ending in 0 or 5
 - **Effect:** Spikes at ages 30, 35, 40, ...
-- **Solution:** P-spline smoothing removes this ✓
+- **Solution:** P-spline smoothing removes this 
 
 **2. Death Registration Completeness**
 - Rural areas may have incomplete registration
@@ -647,7 +647,7 @@ for year in range(2020, 2050):
 **3. Small Population Sizes**
 - Rural departments have <100 deaths per age group
 - **Effect:** Noisy rates
-- **Solution:** P-spline smoothing handles this ✓
+- **Solution:** P-spline smoothing handles this 
 
 ---
 
@@ -693,9 +693,9 @@ for year in range(2020, 2050):
 ### Current Best Practices (2024)
 
 **Human Mortality Database (HMD):**
-- Uses P-splines ✓ (what you have)
+- Uses P-splines  (what you have)
 - Constrained optimization for abridged → single-year
-- **Your code:** Has both ✓
+- **Your code:** Has both 
 
 **UN Population Division:**
 - Traditional Greville method (older)
@@ -712,24 +712,24 @@ for year in range(2020, 2050):
 
 ## Overall Verdict
 
-### Code Quality: ⭐⭐⭐⭐⭐ (5/5)
+### Code Quality:  (5/5)
 - Clean, well-documented, numerically stable
 - Research-grade optimization (IRLS + line search)
 - Comprehensive edge case handling
 
-### Demographic Correctness: ⭐⭐⭐⭐⭐ (5/5)
+### Demographic Correctness:  (5/5)
 - All standard formulas correct
-- Coale-Demeny infant mortality ✓
-- Preston-Heuveline-Guillot qx formula ✓
-- Open interval handling ✓
+- Coale-Demeny infant mortality 
+- Preston-Heuveline-Guillot qx formula 
+- Open interval handling 
 
-### Methodological Sophistication: ⭐⭐⭐⭐⭐ (5/5)
+### Methodological Sophistication:  (5/5)
 - State-of-the-art P-spline smoothing
 - Penalized Poisson likelihood (not naive least squares)
 - 3rd order differences (standard choice)
 - IRLS with backtracking (production-quality)
 
-### **Overall: ⭐⭐⭐⭐⭐ (5/5 stars - Excellent)**
+### **Overall:  (5/5 stars - Excellent)**
 
 **Summary:** This is **publication-quality code** that implements state-of-the-art methods correctly. It matches or exceeds the sophistication of life table construction in major demographic databases (Human Mortality Database, UN WPP). The suggested improvements are minor enhancements, not corrections.
 

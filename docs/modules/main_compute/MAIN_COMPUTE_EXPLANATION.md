@@ -953,7 +953,7 @@ print(f"[output] Combined results saved in {PATHS['results_dir']}")
 │              │ 1. Filter data by DPTO/year     │                     │
 │              ├─────────────────────────────────┤                     │
 │              │ 2. Select death data source     │                     │
-│              ├──────────────────────���──────────┤                     │
+│              ├──────────────────────-──────────┤                     │
 │              │ 3. Build life tables            │                     │
 │              │    (mortality.py)               │                     │
 │              ├─────────────────────────────────┤                     │
@@ -967,7 +967,7 @@ print(f"[output] Combined results saved in {PATHS['results_dir']}")
 │              ├─────────────────────────────────┤                     │
 │              │ 7. Project population           │                     │
 │              │    (projections.py)             │                     │
-│              ├───────────────────────────────���─┤                     │
+│              ├───────────────────────────────-─┤                     │
 │              │ 8. Store results                │                     │
 │              └─────────────────────────────────┘                     │
 │                                                                       │
@@ -1365,10 +1365,10 @@ print(fit.summary())
 5. **I/O** (5% of time, if not suppressed): CSV writes
 
 **Optimization strategies (already implemented):**
-- ✅ I/O suppression during sweep
-- ✅ Thread-based parallelism
-- ✅ In-memory aggregation
-- ✅ Vectorized operations (numpy/pandas)
+-  I/O suppression during sweep
+-  Thread-based parallelism
+-  In-memory aggregation
+-  Vectorized operations (numpy/pandas)
 
 **Potential future optimizations:**
 - Numba JIT compilation for hot loops
@@ -1399,4 +1399,4 @@ print(fit.summary())
 - **Error handling:** Limited validation, can fail silently
 - **Documentation:** No docstrings on main_wrapper (but code is readable)
 
-**Demographic validity:** ✅ Correctly implements cohort-component method with all components (fertility, mortality, migration) integrated properly.
+**Demographic validity:**  Correctly implements cohort-component method with all components (fertility, mortality, migration) integrated properly.

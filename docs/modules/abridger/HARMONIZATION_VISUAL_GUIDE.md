@@ -70,7 +70,7 @@ Split 70+ total (500) by population weights:
   80-84: 500 × 0.185 =  92.6
   85-89: 500 × 0.111 =  55.6
   90+:   500 × 0.037 =  18.5
-        Sum = 500.0 ✓
+        Sum = 500.0 
 ```
 
 ### Output Migration Data
@@ -118,7 +118,7 @@ Split 70+ total (25000) by geometric weights:
   80-84: 25000 × 0.174 = 4350
   85-89: 25000 × 0.122 = 3050
   90+:   25000 × 0.101 = 2525
-         Sum = 25000 ✓
+         Sum = 25000 
 ```
 
 ### Output Census Data
@@ -166,7 +166,7 @@ Split 70+ total (500) by geometric weights:
   80-84: 500 × 0.206 = 103
   85-89: 500 × 0.299 = 150
   90+:   500 × 0.255 = 127
-         Sum = 500 ✓
+         Sum = 500 
 ```
 
 ### Output Death Data
@@ -213,7 +213,7 @@ DPTO  SEX  EDAD   VALOR
 001   M    80-84   92.6
 001   M    85-89   55.6
 001   M    90+     18.5
-Total:           600.0 ✓ (500 + 100)
+Total:           600.0  (500 + 100)
 ```
 
 ---
@@ -246,10 +246,10 @@ DPTO  SEX  EDAD   VALOR
 Aggregated:
   70-74: 185.2  (only from 70+)
   75-79: 148.1  (only from 70+)
-  80-84: 166.7  (92.6 + 74.1) ✓
-  85-89: 111.2  (55.6 + 55.6) ✓
-  90+:    88.9  (18.5 + 70.4) ✓
-  Total: 700.0 ✓ (500 + 200)
+  80-84: 166.7  (92.6 + 74.1) 
+  85-89: 111.2  (55.6 + 55.6) 
+  90+:    88.9  (18.5 + 70.4) 
+  Total: 700.0  (500 + 200)
 ```
 
 ### Scenario B: 80+ is Subset of 70+ (Double-Count!)
@@ -315,14 +315,14 @@ Weights increase with age:
 ## Key Insights
 
 ### When to Use Population-Based
-✓ **Migration data:** Migrant age structure mirrors population  
-✓ **High-quality data:** Population counts available per group  
-✓ **Regional variation:** Different regions have different age structures
+ **Migration data:** Migrant age structure mirrors population  
+ **High-quality data:** Population counts available per group  
+ **Regional variation:** Different regions have different age structures
 
 ### When to Use Geometric
-✓ **Census/deaths:** No template needed  
-✓ **Missing data:** Population unavailable for some groups  
-✓ **Consistency:** Same pattern applied across all groups
+ **Census/deaths:** No template needed  
+ **Missing data:** Population unavailable for some groups  
+ **Consistency:** Same pattern applied across all groups
 
 ### Geometric Ratio Selection
 - **r < 1.0:** Decreasing pattern (younger > older)
