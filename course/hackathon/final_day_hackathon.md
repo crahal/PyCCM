@@ -23,7 +23,7 @@ The session will illustrate how the core components interact to produce consiste
 
 ---
 
-### Section 2 — Code Review and Standards (≈ 30 minutes)
+### Section 2 — Code Review and Standards (≈ 15 minutes)
 
 Jiani Yan will outline the code review process used in PyCCM development, emphasizing version control, testing conventions, and documentation practices.  
 Participants will learn how to submit well-structured contributions and engage in collaborative review.
@@ -57,12 +57,3 @@ Discussion points include:
 - Which indicators and visualizations would best support demographic analysis.  
 - The recommended structure for an interactive, modular dashboard.
 
----
-
-### Section 6 — Future Directions and Open Discussion
-
-The session concludes with an open discussion on further development priorities and research applications.  
-Potential topics include:  
-- Extending PyCCM for subnational or multi-regional projections.  
-- Enhancing computational performance and reproducibility.  
-- Improving documentation, testing coverage, and community engagement.
