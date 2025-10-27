@@ -4,6 +4,7 @@
 from __future__ import annotations
 from typing import Optional, Tuple, List, Dict, Iterable
 import re
+import os
 import numpy as np
 import pandas as pd
 
@@ -21,7 +22,9 @@ _single_pat = re.compile(r"^\s*(\d+)\s*$")               # e.g., 0
 
 
 def parse_edad(label: str) -> Tuple[Optional[int], Optional[int]]:
-    """Return (lo, hi) inclusive; (lo, None) for open-ended; (None, None) if unparsable."""
+    """
+    Return (lo, hi) inclusive; (lo, None) for open-ended; (None, None) if unparsable.
+    """
     if label is None or (isinstance(label, float) and np.isnan(label)):
         return (None, None)
     t = str(label).strip()
@@ -56,12 +59,11 @@ def collapse_convention2(df: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
-# ----------------------------- Life table weights for 0..4 -----------------------------
-
+# ----------------------------- Life table weights for 0-4 -----------------------------
 
 def default_survivorship_0_to_5() -> Dict[int, float]:
     """
-    Illustrative survivorship l_x for x=0..5.
+    Illustrative survivorship l_x for x=0-5.
     Replace with series-specific values if you have life tables by dept/sex/year.
     """
     l0 = 1.00
@@ -75,7 +77,9 @@ def default_survivorship_0_to_5() -> Dict[int, float]:
 
 
 def nLx_1year(lx: Dict[int, float], a0: float = 0.10) -> Dict[int, float]:
-    """nLx for ages 0..4 from survivorship l_x and infant a0."""
+    """
+    nLx for ages 0-4 from survivorship l_x and infant a0.
+    """
     L = {0: lx[1] + a0 * (lx[0] - lx[1])}
     for x in range(1, 5):
         L[x] = 0.5 * (lx[x] + lx[x+1])
@@ -83,6 +87,10 @@ def nLx_1year(lx: Dict[int, float], a0: float = 0.10) -> Dict[int, float]:
 
 
 def weights_from_nLx(L: Dict[int, float], ages: List[int]) -> np.ndarray:
+    """
+    Normalize nLx values for given ages to sum to 1.0; fallback to
+    uniform weights if L is missing or non-positive.
+    """
     w = np.array([max(L.get(a, 0.0), 0.0) for a in ages], dtype=float)
     s = w.sum()
     if not np.isfinite(s) or s <= 0:
@@ -94,6 +102,10 @@ def weights_from_nLx(L: Dict[int, float], ages: List[int]) -> np.ndarray:
 
 
 def _second_diff_matrix(n: int) -> np.ndarray:
+    """
+    Return (n-2) x n second-difference matrix D for n variables.
+    If n < 3, return empty (0 x n) matrix.
+    """
     if n < 3:
         return np.zeros((0, n))
     D = np.zeros((n-2, n), dtype=float)
@@ -128,13 +140,21 @@ def _apply_infant_adjustment(constraints: List[Tuple[int,int,float]],
     """
     For VARIABLE == 'poblacion_total':
       - If 0–4 and age 0 present, split remainder 1–4 with nLx weights.
-      - If 0–4 only, split 0..4 with nLx weights.
-      - If 1–4 present, split 1..4 with nLx weights.
+      - If 0–4 only, split 0-4 with nLx weights.
+      - If 1–4 present, split 1-4 with nLx weights.
     Constraints are (lo, hi, total) with hi==lo for point constraints.
+    
+    Parameters
+    ----------
+    constraints : List of (lo, hi, total) tuples; hi==None (open-ended) skipped downstream
+    variable : VARIABLE string from the data; adjustment only for 'poblacion_total'
+    lx : Optional dict of survivorship l_x for x=0-5; if None, use default illustrative values
+    a0 : Infant fraction of first-year exposure; default 0.10
     """
+    
+    # Only apply for poblacion_total
     if variable != "poblacion_total":
         return constraints
-
 
     if lx is None:
         lx = default_survivorship_0_to_5()
@@ -178,7 +198,22 @@ def _unabridge_one_group(g: pd.DataFrame,
                          variable: str,
                          value_col: str,
                          ridge: float = 1e-6) -> pd.DataFrame:
-    """Return single-year rows for one (series_keys) group."""
+    """
+    Return single-year rows for one (series_keys) group.
+    
+    Parameters
+    ----------
+    g : Input DataFrame for one group (series_keys).
+    series_keys : List of columns defining the group.
+    variable : VARIABLE string from the data; used for infant adjustment.
+    value_col : Column name for counts.
+    ridge : Ridge regularization for smoothing.
+    
+    Notes
+    -----
+    - Rows with open-ended or unparsable EDAD are skipped (handled upstream).
+    - Infant adjustment applied only for VARIABLE == 'poblacion_total'.
+    """
     finite = g[g["EDAD_MAX"].notna()].copy()
     if finite.empty:
         return pd.DataFrame(columns=[*series_keys, "EDAD", value_col])
@@ -217,16 +252,16 @@ def _unabridge_one_group(g: pd.DataFrame,
             A_rows.append(row)
             b_vals.append(total)
 
-
+    # Handle empty case
     if not A_rows:
         return pd.DataFrame(columns=[*series_keys, "EDAD", value_col])
 
-
+    # Smoothing
     A = np.vstack(A_rows)
     b = np.asarray(b_vals, dtype=float)
     x = _solve_smooth(A, b, n=len(ages), ridge=ridge)
 
-
+    
     out = pd.DataFrame({
         **{col: g.iloc[0][col] if col in g.columns else np.nan for col in series_keys},
         "EDAD": [str(a) for a in ages],
@@ -242,7 +277,20 @@ def unabridge_df(df: pd.DataFrame,
     """
     Unabridge a conteos-like DataFrame using 'value_col' for counts.
     Returns a DataFrame with the same series keys and EDAD as single-year strings.
+    
+    Parameters
+    ----------
+    df : Input DataFrame with at least series_keys + EDAD + value_col.
+    series_keys : List of columns defining series (default SERIES_KEYS_DEFAULT).
+    value_col : Column name for counts (default 'VALOR_corrected').
+    ridge : Ridge regularization for smoothing (default 1e-6).
+    
+    Notes
+    -----
+    - Rows with open-ended or unparsable EDAD are passed through unchanged.
+    - Infant adjustment applied only for VARIABLE == 'poblacion_total'.
     """
+    
     series_keys = list(series_keys)
     work = df.copy()
 
@@ -257,7 +305,7 @@ def unabridge_df(df: pd.DataFrame,
     outputs = []
     passthrough = []
 
-
+    # Process each group 
     for _, g in work.groupby(series_keys, dropna=False):
         var = g.iloc[0]["VARIABLE"] if "VARIABLE" in g.columns else ""
         # single-year/open-ended passthrough (EDAD_MAX is NaN => open-ended or unparsable)
@@ -297,10 +345,19 @@ def _weights_from_pop_or_geometric(
     """
     Compute weights over 'bins' using population shares if available; otherwise
     use a geometric pattern w_j ∝ r^{j} with j increasing with age (older → smaller).
+    
+    Parameters
+    ----------
+    pop_g : Population DataFrame for the same group as migration.
+    bins : List of age bin labels to compute weights for.
+    pop_value_col : Column name for population counts (default 'VALOR_corrected').
+    r : Geometric ratio for fallback weights (default 0.60).
     """
+    
     v = np.array([float(pop_g.loc[pop_g["EDAD"].astype(str).str.strip().eq(b), pop_value_col].sum())
-                  for b in bins], dtype=float)
-    S = float(np.nansum(v))
+                  for b in bins], dtype=float)  # population values
+    S = float(np.nansum(v)) # total population in these bins
+    
     if np.isfinite(S) and S > 0:
         w = np.nan_to_num(v / S, nan=0.0, posinf=0.0, neginf=0.0)
         s = w.sum()
@@ -324,10 +381,23 @@ def harmonize_migration_to_90plus(
     Use population shares at the *same* (series_keys) to allocate totals.
     If population shares are unavailable, use a geometric fallback.
 
+    Parameters
+    ----------
+    mig : Migration DataFrame with EDAD and value_col.
+    pop : Population DataFrame with EDAD and pop_value_col.
+    series_keys : List of keys to group by (e.g., ["GEO", "YEAR"]).
+    value_col : Column name for migration values (default "VALOR").
+    pop_value_col : Column name for population values (default "VALOR_corrected").
 
+    
     Returns a new DataFrame with the same schema (series_keys + EDAD + value_col),
     and no raw '70+'/'80+' tails.
     """
+    
+    # Early exit if neither 70+ nor 80+ present
+    if not "70+" in mig["EDAD"].values and not "80+" in mig["EDAD"].values:
+        return mig.copy()
+    
     req_mig = set(series_keys + ["EDAD", value_col])
     missing_mig = req_mig - set(mig.columns)
     if missing_mig:
@@ -403,10 +473,67 @@ _CONTEOS_70_TO_90 = ["70-74", "75-79", "80-84", "85-89", "90+"]
 _CONTEOS_80_TO_90 = ["80-84", "85-89", "90+"]
 
 
-def _geom_weights(bands: list[str], r: float, increasing: bool) -> np.ndarray:
-    # bands ordered youngest -> oldest
+def _geom_weights(bands: list[str], r: float) -> np.ndarray:
+    """
+    Geometric weights for given bands, with ratio r.
+    
+    Parameters
+    ----------
+    bands : List of age band labels (ordered youngest to oldest)
+    r : Geometric ratio controlling weight distribution
+        - r < 1: Weights DECREASE with age (younger bands get more weight)
+        - r > 1: Weights INCREASE with age (older bands get more weight)
+        - r = 1: All bands get equal weight
+    
+    Returns
+    -------
+    np.ndarray : Normalized weights that sum to 1.0
+    
+    Notes
+    -----
+    Weights are computed using the geometric sequence w_j ∝ r^j where j=0,1,2,...
+    indexes bands from youngest to oldest. The natural behavior of this formula is:
+    
+    - **r < 1** (e.g., 0.7): Sequence [1.0, 0.7, 0.49, ...] → younger bands larger
+      Use for population tails where younger ages have more people.
+      
+    - **r > 1** (e.g., 1.4): Sequence [1.0, 1.4, 1.96, ...] → older bands larger
+      Use for death tails where mortality increases with age.
+      
+    - **r = 1**: Sequence [1.0, 1.0, 1.0, ...] → uniform weights
+    
+    The r value directly controls the pattern. Users must choose the appropriate
+    r value for their demographic context.
+    
+    Examples
+    --------
+    Population tail (r=0.7, decreasing weights):
+        bands = ["70-74", "75-79", "80-84"]
+        Sequence: [0.7^0, 0.7^1, 0.7^2] = [1.0, 0.7, 0.49]
+        Normalized: [0.457, 0.320, 0.224]
+        Result: 70-74 > 75-79 > 80-84 (younger gets more) ✓
+    
+    Deaths tail (r=1.4, increasing weights):
+        bands = ["80-84", "85-89", "90+"]
+        Sequence: [1.4^0, 1.4^1, 1.4^2] = [1.0, 1.4, 1.96]
+        Normalized: [0.229, 0.321, 0.450]
+        Result: 80-84 < 85-89 < 90+ (older gets more) ✓
+    
+    Uniform weights (r=1.0):
+        bands = ["80-84", "85-89", "90+"]
+        Sequence: [1.0, 1.0, 1.0]
+        Normalized: [0.333, 0.333, 0.333]
+        Result: All equal ✓
+    """
+    # bands ordered youngest -> oldest, j = 0, 1, 2, ...
     j = np.arange(len(bands), dtype=float)
-    base = (r ** j) if increasing else (r ** (len(bands)-1-j))
+    
+    # Geometric sequence: r^j
+    # - r < 1: decreasing weights (younger → older)
+    # - r > 1: increasing weights (younger → older)
+    base = r ** j
+    
+    # Normalize to sum to 1.0
     w = base / base.sum()
     return w.astype(float)
 
@@ -418,11 +545,21 @@ def harmonize_conteos_to_90plus(
     r_pop: float = 0.70,     # population tail: younger>older
     r_deaths: float = 1.45   # deaths tail:    older>younger
 ) -> pd.DataFrame:
+    
     """
     Replace 70+ / 80+ in poblacion_total and defunciones with
     70-74,75-79,80-84,85-89,90+ (or 80-84,85-89,90+) using geometric weights.
     Totals per (series_keys, VARIABLE) preserved. Other variables pass through.
+    
+    Parameters
+    ----------
+    df : Input DataFrame with at least series_keys + VARIABLE + EDAD + value_col
+    series_keys : List of columns defining series (e.g., ["GEO", "YEAR"]).
+    value_col : Column name for counts (default 'VALOR_corrected').
+    r_pop : Geometric ratio for population tail weights (default 0.70).
+    r_deaths : Geometric ratio for deaths tail weights (default 1.45).
     """
+    
     need = set(series_keys + ["VARIABLE", "EDAD", value_col])
     missing = need - set(df.columns)
     if missing:
@@ -457,9 +594,9 @@ def harmonize_conteos_to_90plus(
             tot = float(g.loc[m70, value_col].sum())
             g = g.loc[~m70].copy()
             if var_cmp == "poblacion_total":
-                w = _geom_weights(_CONTEOS_70_TO_90, r_pop, increasing=False)
+                w = _geom_weights(_CONTEOS_70_TO_90, r_pop)
             else:  # defunciones
-                w = _geom_weights(_CONTEOS_70_TO_90, r_deaths, increasing=True)
+                w = _geom_weights(_CONTEOS_70_TO_90, r_deaths)
             for band, wi in zip(_CONTEOS_70_TO_90, w):
                 row = {**keyvals}
                 row["VARIABLE"] = var_val
@@ -474,9 +611,9 @@ def harmonize_conteos_to_90plus(
             tot = float(g.loc[m80, value_col].sum())
             g = g.loc[~m80].copy()
             if var_cmp == "poblacion_total":
-                w = _geom_weights(_CONTEOS_80_TO_90, r_pop, increasing=False)
+                w = _geom_weights(_CONTEOS_80_TO_90, r_pop)
             else:
-                w = _geom_weights(_CONTEOS_80_TO_90, r_deaths, increasing=True)
+                w = _geom_weights(_CONTEOS_80_TO_90, r_deaths)
             for band, wi in zip(_CONTEOS_80_TO_90, w):
                 row = {**keyvals}
                 row["VARIABLE"] = var_val
@@ -510,10 +647,20 @@ def unabridge_all(*,
                   conteos_value_col: str = "VALOR_corrected",
                   ridge: float = 1e-6) -> Dict[str, pd.DataFrame]:
     """
-    Unabridge:
-      - df (using df[conteos_value_col], typically VALOR_corrected),
-      - emi, imi (using their VALOR).
-    Returns dict with keys: 'conteos', 'emi', 'imi' (all single-year).
+    Unabridge DataFrames for analysis. 
+    
+    Parameters
+    ----------
+    df : DataFrame of df[conteos_value_col], typically VALOR_corrected
+    emi : DataFrame with emigracion data (uses VALOR).
+    imi : DataFrame with inmigracion data (uses VALOR).
+    series_keys : List of columns defining series (default SERIES_KEYS_DEFAULT).
+    conteos_value_col : Column name for counts in 'df' (default 'VALOR_corrected').
+    ridge : Ridge regularization for smoothing (default 1e-6).
+
+    Returns
+    -------
+    Dict with keys 'conteos', 'emi', 'imi' and unabridged DataFrames as values.
     """
     series_keys = list(series_keys)
 
@@ -558,8 +705,9 @@ def unabridge_all(*,
 
 
 def save_unabridged(objs: Dict[str, pd.DataFrame], out_dir: str) -> None:
-    """Persist unabridged outputs to CSV."""
-    import os
+    """
+    Persist unabridged outputs to CSV.
+    """
     os.makedirs(out_dir, exist_ok=True)
     for key, frame in objs.items():
         path = os.path.join(out_dir, f"{key}_unabridged_single_year.csv")

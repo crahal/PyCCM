@@ -17,6 +17,7 @@
 
 
 from __future__ import annotations
+from typing import Optional, Dict, List
 import os
 import sys
 import zlib
@@ -161,12 +162,12 @@ def _coerce_int_pos(x):
     except Exception:
         return None
 
-def _read_mortality_improvements_csv(path_csv: str | None) -> dict[str, dict]:
+def _read_mortality_improvements_csv(path_csv: Optional[str]) -> Dict[str, dict]:
     """
     Read per-DPTO mortality improvement parameters from CSV.
     SILENT: does not print. Presence/absence is reported by _load_supplementaries().
     """
-    params_by_dpto: dict[str, dict] = {}
+    params_by_dpto: Dict[str, dict] = {}
     csv_path = path_csv or PATHS.get("mortality_improvements_csv")
     if not csv_path or not os.path.exists(csv_path):
         return params_by_dpto
@@ -318,10 +319,10 @@ def _load_supplementaries(paths: dict, *, default_midpoint: float) -> dict:
 SUPP = _load_supplementaries(PATHS, default_midpoint=DEFAULT_MIDPOINT)
 
 # ---------------------------- Aggregator data structures ----------------------------
-lifetable_records: list[pd.DataFrame] = []
-asfr_records: list[pd.DataFrame] = []
-projection_records: list[pd.DataFrame] = []
-leslie_records: list[pd.DataFrame] = []
+lifetable_records: List[pd.DataFrame] = []
+asfr_records: List[pd.DataFrame] = []
+projection_records: List[pd.DataFrame] = []
+leslie_records: List[pd.DataFrame] = []
 
 # Global progress bar handle (single bar)
 _GLOBAL_PBAR = None
@@ -921,7 +922,7 @@ if __name__ == "__main__":
             main_wrapper(conteos_in, emi_in, imi_in, projection_range, "draw", dist, label, supp=SUPP)
         return label
 
-    def _inclusive_arange(start: float, stop: float, step: float) -> list[float]:
+    def _inclusive_arange(start: float, stop: float, step: float) -> List[float]:
         if step == 0:
             return [start]
         vals = []; v = float(start)

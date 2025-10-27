@@ -1,4 +1,5 @@
 # src/projections.py
+from typing import List
 import os
 import re
 import numpy as np
@@ -77,8 +78,7 @@ def _hazard_from_survival(s: float, step: float) -> float:
 
 
 
-
-def _format_age_labels_from_lifetable_index(ages: np.ndarray, step: int) -> list[str]:
+def _format_age_labels_from_lifetable_index(ages: np.ndarray, step: int) -> List[str]:
     ages = np.asarray(ages, int)
     if ages.size == 0:
         return []

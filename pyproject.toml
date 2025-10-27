@@ -13,7 +13,10 @@ dependencies = [
     "pandas>=2.0",
     "tqdm>=4.65",
     "pyarrow>=14.0",
-    "PyCCM @ file:///${PROJECT_ROOT}/",
+    "pyyaml>=6.0",
+    "pyreadr>=0.5.0",
+    "matplotlib>=3.7.0",
+    "seaborn>=0.12.0",
     "geopandas>=1.1.1",
     "mapclassify>=2.10.0",
     "shapely>=2.1.2",
@@ -25,4 +28,4 @@ text = "MIT"
 line-length = 100
 
 [tool.pdm]
-distribution = false]
+distribution = false

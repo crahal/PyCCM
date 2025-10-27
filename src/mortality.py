@@ -2,7 +2,7 @@
 import numpy as np
 import pandas as pd
 import warnings
-from typing import Dict, Tuple
+from typing import Dict, Tuple, Optional
 
 # ---------------------------------------------------------------------
 # Utilities
@@ -48,7 +48,17 @@ def _difference_matrix(n: int, order: int) -> np.ndarray:
     """
     if order < 1:
         raise ValueError("difference order must be >= 1")
-    from math import comb
+    # Binomial coefficients (Python 3.7 compatible)
+    def comb(n, k):
+        if k > n or k < 0:
+            return 0
+        if k == 0 or k == n:
+            return 1
+        k = min(k, n - k)
+        c = 1
+        for i in range(k):
+            c = c * (n - i) // (i + 1)
+        return c
     coeff = np.array([(-1)**r * comb(order, r) for r in range(order + 1)], dtype=float)  # length order+1
     rows = n - order
     D = np.zeros((rows, n), dtype=float)
@@ -207,7 +217,7 @@ def make_lifetable(
     radix: int = 100_000,
     open_interval_width: int = 5,
     use_pspline: bool = False,
-    pspline_kwargs: Dict[str, float] | None = None,
+    pspline_kwargs: Optional[Dict[str, float]] = None,
     use_ma: bool = True,
     ma_window: int = 5
 ) -> pd.DataFrame:

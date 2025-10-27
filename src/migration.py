@@ -3,6 +3,7 @@
 
 import numpy as np
 import pandas as pd
+from typing import Optional
 
 EDAD_ORDER = [
     '0-4','5-9','10-14','15-19','20-24','25-29',
@@ -10,7 +11,7 @@ EDAD_ORDER = [
     '60-64','65-69','70-74','75-79','80+'
 ]
 
-def create_migration_frame(conteos: pd.DataFrame, year: int | None = 2018) -> pd.DataFrame:
+def create_migration_frame(conteos: pd.DataFrame, year: Optional[int] = 2018) -> pd.DataFrame:
     """
     Build a national (ANO, EDAD, SEXO) panel with:
       inmigracion_F, emigracion_F, net_migration, poblacion_total, net_mig_rate.
