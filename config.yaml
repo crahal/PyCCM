@@ -1,9 +1,9 @@
 paths:
   data_dir: "./data"
-  results_dir: "./results"
+  results_dir: "./julianas_results"
   target_tfr_csv: "./data/target_tfrs.csv"
   midpoints_csv: "./data/midpoints.csv"
-  mortality_improvements_csv: "./data/mortality_improvements.csv"
+  mortality_improvements_csv: "./data/mortality_improvements_in_class.csv"
 
 diagnostics:
   print_target_csv: true
@@ -20,7 +20,7 @@ projections:
   start_year: 2018
   end_year: 2069  # note this will produce projections to end_year + 1
   step_years: 1
-  death_choices: ["censo_2018"]
+  death_choices: ["EEVV"]
   last_observed_year_by_death:
     EEVV: 2023
     censo_2018: 2018
@@ -90,7 +90,7 @@ runs:
     - { sample_type: "high", distribution: null, label: "high_omissions" }
   draws:
     num_draws: 1000
-    dist_types: ["uniform", "pert", "beta", "normal"]
+    dist_types: ["uniform"]
     label_pattern: "{dist}_draw_{i}"
 
 parallel:
