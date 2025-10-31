@@ -1,6 +1,6 @@
 paths:
   data_dir: "./data"
-  results_dir: "./results_unabridged"
+  results_dir: "./results"
   target_tfr_csv: "./data/target_tfrs.csv"
   midpoints_csv: "./data/midpoints.csv"
   mortality_improvements_csv: "./data/mortality_improvements.csv"
@@ -20,7 +20,7 @@ projections:
   start_year: 2018
   end_year: 2069  # note this will produce projections to end_year + 1
   step_years: 1
-  death_choices: ["EEVV", "censo_2018", "midpoint"]
+  death_choices: ["censo_2018"]
   last_observed_year_by_death:
     EEVV: 2023
     censo_2018: 2018
