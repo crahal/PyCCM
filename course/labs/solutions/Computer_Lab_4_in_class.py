@@ -37,90 +37,6 @@ from helpers import _collapse_defunciones_01_24_to_04, _tfr_from_asfr_df, _smoot
 data_path = Path.cwd().parent/'data'
 
 
-# Helper function to extract and unabridge migration flows by sex
-def extract_migration_arrays(df_migration, sexo, ages_1yr):
-    """
-    Extract and unabridge immigration and emigration for a given sex.
-    
-    Parameters:
-    -----------
-    df_migration : pd.DataFrame
-        Migration frame from create_migration_frame()
-    sexo : int
-        Sex code (1=Male, 2=Female)
-    ages_1yr : list
-        List of single-year age labels ['0', '1', ..., '90+']
-    
-    Returns:
-    --------
-    inmig_array : np.ndarray
-        Unabridged immigration by single-year age
-    emig_array : np.ndarray
-        Unabridged emigration by single-year age
-    """
-    # Filter by sex
-    df_mig = df_migration[df_migration['SEXO'] == sexo].copy().reset_index(drop=True)
-    df_mig['EDAD'] = df_mig['EDAD'].astype(str)
-    
-    # Unabridge immigration
-    df_in = unabridge_df(df_mig, series_keys=['ANO', 'SEXO'], value_col='inmigracion_F')
-    df_in = df_in.groupby('EDAD')['inmigracion_F'].sum().reindex(ages_1yr, fill_value=0.0)
-    inmig_array = df_in.values
-    
-    # Unabridge emigration
-    df_out = unabridge_df(df_mig, series_keys=['ANO', 'SEXO'], value_col='emigracion_F')
-    df_out = df_out.groupby('EDAD')['emigracion_F'].sum().reindex(ages_1yr, fill_value=0.0)
-    emig_array = df_out.values
-    
-    return inmig_array, emig_array
-
-
-def project_with_migration(leslie_f, leslie_m, pop_f_init, pop_m_init, 
-                           inmig_f, emig_f, inmig_m, emig_m, n_years):
-    """
-    Project population forward with migration using half-before/half-after timing.
-    
-    Parameters:
-    -----------
-    leslie_f, leslie_m : np.ndarray
-        Leslie matrices for females and males
-    pop_f_init, pop_m_init : np.ndarray
-        Initial population vectors by age
-    inmig_f, emig_f : np.ndarray
-        Annual immigration and emigration flows for females by age
-    inmig_m, emig_m : np.ndarray
-        Annual immigration and emigration flows for males by age
-    n_years : int
-        Number of years to project
-    
-    Returns:
-    --------
-    proj_f, proj_m : np.ndarray
-        Projected population matrices (years × ages)
-    """
-    n_ages = len(pop_f_init)
-    proj_f = np.zeros((n_years + 1, n_ages))
-    proj_m = np.zeros((n_years + 1, n_ages))
-    
-    proj_f[0, :] = pop_f_init
-    proj_m[0, :] = pop_m_init
-    
-    for t in range(n_years):
-        # Half-before: remove half of emigrants (reduces exposure)
-        prev_f_adj = np.maximum(proj_f[t, :] - 0.5 * emig_f, 0.0)
-        prev_m_adj = np.maximum(proj_m[t, :] - 0.5 * emig_m, 0.0)
-        
-        # Apply Leslie matrices
-        proj_f_next = leslie_f @ prev_f_adj
-        proj_m_next = leslie_m @ prev_m_adj
-        
-        # Half-after: add remaining emigrants + immigration
-        proj_f[t + 1, :] = proj_f_next - 0.5 * emig_f + inmig_f
-        proj_m[t + 1, :] = proj_m_next - 0.5 * emig_m + inmig_m
-    
-    return proj_f, proj_m
-
-
 
 # Load the data using PyCCM data_loaders
 data_dict = load_all_data(data_path)
@@ -399,7 +315,7 @@ print("Section 2.6: Project Population One Step Forward")
 print("="*60)
 
 # Project one year forward: pop_{t+1} = L * pop_t
-population_f_next = leslie_matrix_F @ population_f  # Matrix multiplication
+population_f_next = leslie_matrix_F @ population_f # Matrix multiplication
 
 print(f"\nPopulation projection (1 year forward):")
 print(f"  Current (year {year}):      {population_f.sum():,.0f}")
@@ -642,9 +558,49 @@ print(f"  Total immigration: {df_migration['inmigracion_F'].sum():,.0f}")
 print(f"  Total emigration:  {df_migration['emigracion_F'].sum():,.0f}")
 print(f"  Net migration:     {df_migration['net_migration'].sum():,.0f}")
 
-# Extract and unabridge migration flows using helper function
-inmig_f, emig_f = extract_migration_arrays(df_migration, sexo=2, ages_1yr=ages_1yr)
-inmig_m, emig_m = extract_migration_arrays(df_migration, sexo=1, ages_1yr=ages_1yr)
+# Separate by sex and unabridge migration (immigration & emigration separately)
+df_mig_f = df_migration[df_migration['SEXO'] == 2].copy().reset_index(drop=True)
+df_mig_m = df_migration[df_migration['SEXO'] == 1].copy().reset_index(drop=True)
+
+# Ensure EDAD column is string type
+df_mig_f['EDAD'] = df_mig_f['EDAD'].astype(str)
+df_mig_m['EDAD'] = df_mig_m['EDAD'].astype(str)
+
+# Unabridge IMMIGRATION for females
+df_mig_f_in = unabridge_df(
+    df_mig_f,
+    series_keys=['ANO', 'SEXO'],
+    value_col='inmigracion_F'
+)
+df_mig_f_in = df_mig_f_in.groupby('EDAD')['inmigracion_F'].sum().reindex(ages_1yr, fill_value=0.0)
+inmig_f = df_mig_f_in.values
+
+# Unabridge EMIGRATION for females
+df_mig_f_out = unabridge_df(
+    df_mig_f,
+    series_keys=['ANO', 'SEXO'],
+    value_col='emigracion_F'
+)
+df_mig_f_out = df_mig_f_out.groupby('EDAD')['emigracion_F'].sum().reindex(ages_1yr, fill_value=0.0)
+emig_f = df_mig_f_out.values
+
+# Unabridge IMMIGRATION for males
+df_mig_m_in = unabridge_df(
+    df_mig_m,
+    series_keys=['ANO', 'SEXO'],
+    value_col='inmigracion_F'
+)
+df_mig_m_in = df_mig_m_in.groupby('EDAD')['inmigracion_F'].sum().reindex(ages_1yr, fill_value=0.0)
+inmig_m = df_mig_m_in.values
+
+# Unabridge EMIGRATION for males
+df_mig_m_out = unabridge_df(
+    df_mig_m,
+    series_keys=['ANO', 'SEXO'],
+    value_col='emigracion_F'
+)
+df_mig_m_out = df_mig_m_out.groupby('EDAD')['emigracion_F'].sum().reindex(ages_1yr, fill_value=0.0)
+emig_m = df_mig_m_out.values
 
 print(f"\n✓ Migration unabridged to single-year ages:")
 print(f"  Female immigration by age: {inmig_f.sum():,.0f}")
@@ -654,14 +610,34 @@ print(f"  Male immigration by age:   {inmig_m.sum():,.0f}")
 print(f"  Male emigration by age:    {emig_m.sum():,.0f}")
 print(f"  Male net migration:        {(inmig_m - emig_m).sum():,.0f}")
 
-# Project with migration using helper function (half-before/half-after timing)
+# Project with migration using half-before/half-after timing
 # This better reflects exposure: emigrants leave mid-year, immigrants arrive mid-year
-projections_f_mig, projections_m_mig = project_with_migration(
-    leslie_matrix_F, leslie_matrix_M,
-    population_f, population_m,
-    inmig_f, emig_f, inmig_m, emig_m,
-    projection_years
-)
+projections_f_mig = np.zeros((projection_years + 1, n_ages))
+projections_m_mig = np.zeros((projection_years + 1, n_ages))
+
+projections_f_mig[0, :] = population_f
+projections_m_mig[0, :] = population_m
+
+for t in range(projection_years):
+    # Start-of-year population
+    prev_f = projections_f_mig[t, :].copy()
+    prev_m = projections_m_mig[t, :].copy()
+    
+    # Remove half of emigrants before projection (reduced exposure to mortality/fertility)
+    prev_f_adj = prev_f - 0.5 * emig_f
+    prev_m_adj = prev_m - 0.5 * emig_m
+    
+    # Ensure no negative population by age
+    prev_f_adj = np.maximum(prev_f_adj, 0.0)
+    prev_m_adj = np.maximum(prev_m_adj, 0.0)
+    
+    # Project with Leslie matrices
+    proj_f = leslie_matrix_F @ prev_f_adj
+    proj_m = leslie_matrix_M @ prev_m_adj
+    
+    # Add remaining half of emigrants plus full immigration (end-of-year inflows)
+    projections_f_mig[t + 1, :] = proj_f - 0.5 * emig_f + inmig_f
+    projections_m_mig[t + 1, :] = proj_m - 0.5 * emig_m + inmig_m
 
 total_pop_f_mig = projections_f_mig.sum(axis=1)
 total_pop_m_mig = projections_m_mig.sum(axis=1)
