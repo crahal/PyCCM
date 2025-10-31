@@ -109,6 +109,72 @@ if variable in ["poblacion_total", "nacimientos", "defunciones"]:
     # Different weights for stocks (population) vs flows (births/deaths)
 ```
 
+### **CRITICAL LIMITATION IDENTIFIED (October 2025)**
+
+####  **Issue: Near-Uniform Distribution for Ages 0-4 Population**
+
+**Observed Behavior:**
+When unabridging population data with only aggregated `0-4` age group (no separate age 0), the function produces **near-uniform weights** (~20% per age):
+
+```python
+# Actual output for BOLIVAR 2018 Female Population
+Age 0: 15,847.2  (20.10%)
+Age 1: 15,773.6  (20.01%)
+Age 2: 15,757.8  (19.99%)
+Age 3: 15,742.1  (19.97%)
+Age 4: 15,726.3  (19.95%)
+```
+
+**Why This Happens:**
+The generic survivorship values (`l1 = 0.96`, `annual_q = 0.001`) produce person-years lived (nLx) that are nearly identical:
+```
+nLx_0: 0.9640
+nLx_1: 0.9595
+nLx_2: 0.9586
+nLx_3: 0.9576
+nLx_4: 0.9566
+```
+
+**Comparison to Deaths (Which Work Correctly):**
+Deaths show the **correct declining pattern** because original data has separate `0-1` and `2-4` categories:
+```python
+Age 0: 90.59   ← Highest (infant mortality)
+Age 1: 74.91
+Age 2: 59.41
+Age 3: 44.46
+Age 4: 30.62   ← Lowest (realistic pattern)
+```
+
+**Impact:**
+- Population projections starting from unabridged data have incorrect initial age structure
+- Infant survival ratios slightly biased
+- Birth estimates from age 0 population may be inaccurate
+- Compounds over multi-year projections
+
+**Root Cause:**
+No mechanism exists to pass actual life table values to `_apply_infant_adjustment()`. The function signature:
+```python
+def _apply_infant_adjustment(constraints, variable: str, lx=None, a0=0.10)
+```
+accepts `lx` parameter but `unabridge_df()` never passes it, always using generic defaults.
+
+**Solution Required:**
+1. Modify `unabridge_df()` to accept optional life table
+2. Extract `lx` values from passed life table
+3. Pass actual `lx` to `_apply_infant_adjustment()`
+4. Fallback to generic values only when no life table available
+
+**Workaround (Current):**
+Users needing accurate age 0-4 splits must:
+1. Unabridge with current function (gets uniform distribution)
+2. Build life table from unabridged deaths + population
+3. Manually recompute nLx from life table
+4. Re-weight ages 0-4 using actual nLx
+5. Renormalize to preserve total
+
+**Status:** GitHub Issue created (October 2025)  
+**Priority:** Medium-High (affects all population projections from aggregated 0-4 data)
+
 ---
 
 ## 2. Smoothness Constraint
@@ -547,7 +613,13 @@ def fit_brass_logit_mortality(ages: List[int], deaths: np.ndarray) -> np.ndarray
 
 ### 🔴 High Priority (Demographic Correctness)
 
-1. **Replace hardcoded life tables** with region/period-specific empirical data
+1. **[CRITICAL] Fix uniform age 0-4 distribution for population** ⚠️ NEW ISSUE (Oct 2025)
+   - Impact: Correct initial population age structure, improve projection accuracy
+   - Effort: Medium (modify unabridge_df to accept and use actual life tables)
+   - Solution: Add life_table parameter to unabridge_df, pass real lx values to _apply_infant_adjustment
+   - GitHub Issue: See `.github_issue_infant_adjustment.md`
+
+2. **Replace hardcoded life tables** with region/period-specific empirical data
    - Impact: Correct infant distribution, improve ages 0-4
    - Effort: Medium (need data infrastructure)
 

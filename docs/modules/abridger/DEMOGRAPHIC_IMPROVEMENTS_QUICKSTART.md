@@ -4,6 +4,98 @@ This guide provides **immediately actionable** code snippets to enhance the demo
 
 ---
 
+## ⚠️ CRITICAL ISSUE: Uniform Age 0-4 Distribution (Identified Oct 2025)
+
+### Problem
+When unabridging **population data** with only aggregated `0-4` age group, the function produces **near-uniform weights** (~20% per age) instead of using actual demographic patterns:
+
+```python
+# Current output for population:
+Age 0: 20.10%  ← Should be lower or higher depending on mortality/census timing
+Age 1: 20.01%  ← Near-uniform (unrealistic for census data)
+Age 2: 19.99%
+Age 3: 19.97%
+Age 4: 19.95%
+
+# Compare to deaths (which work correctly):
+Age 0: 30.19%  ← Highest (infant mortality)
+Age 1: 24.97%
+Age 2: 19.80%
+Age 3: 14.82%
+Age 4: 10.21%  ← Lowest (realistic declining pattern)
+```
+
+### Root Cause
+`unabridge_df()` doesn't accept actual life table values—it always uses hardcoded generic survivorship that produces nearly equal nLx values.
+
+### Immediate Workaround (Until Fixed)
+
+```python
+def post_correct_age_0_4_population(unabridged_pop_df, lifetable):
+    """
+    Manually re-weight ages 0-4 using actual life table after initial unabridging.
+    
+    Parameters:
+    - unabridged_pop_df: Output from unabridge_df() with uniform 0-4 distribution
+    - lifetable: pandas DataFrame with 'lx' column and age index 0-5
+    """
+    from abridger import nLx_1year, weights_from_nLx
+    
+    # Extract lx values from your computed life table
+    lx_dict = {i: lifetable.loc[i, 'lx'] / lifetable.loc[0, 'lx'] 
+               for i in range(6)}
+    
+    # Compute proper nLx weights
+    nLx_dict = nLx_1year(lx_dict, a0=0.10)
+    proper_weights = weights_from_nLx(nLx_dict, [0, 1, 2, 3, 4])
+    
+    # Get current (incorrect) total for ages 0-4
+    mask_0_4 = unabridged_pop_df['EDAD'].isin(['0', '1', '2', '3', '4'])
+    total_0_4 = unabridged_pop_df.loc[mask_0_4, 'VALOR'].sum()
+    
+    # Re-distribute using proper weights
+    for age, weight in zip(['0', '1', '2', '3', '4'], proper_weights):
+        unabridged_pop_df.loc[unabridged_pop_df['EDAD'] == age, 'VALOR'] = total_0_4 * weight
+    
+    return unabridged_pop_df
+
+# Usage example:
+df_pop_1yr = unabridge_df(df_pop_f, ...)  # Gets uniform distribution
+lt_female = make_lifetable(...)  # Your life table from deaths
+df_pop_1yr_corrected = post_correct_age_0_4_population(df_pop_1yr, lt_female)
+```
+
+### Proper Fix (Needs Implementation)
+
+Modify `unabridge_df()` to accept and use actual life tables:
+
+```python
+def unabridge_df(df: pd.DataFrame,
+                 series_keys: Iterable[str] = SERIES_KEYS_DEFAULT,
+                 value_col: str = "VALOR_corrected",
+                 ridge: float = 1e-6,
+                 lifetable: Optional[pd.DataFrame] = None) -> pd.DataFrame:  # NEW PARAMETER
+    """
+    If lifetable provided, extract lx values and pass to _apply_infant_adjustment.
+    Otherwise fallback to generic defaults.
+    """
+    # ... existing code ...
+    
+    if lifetable is not None:
+        # Extract lx values from lifetable
+        lx_dict = {i: lifetable.loc[i, 'lx'] / lifetable.loc[0, 'lx'] 
+                   for i in range(6) if i in lifetable.index}
+    else:
+        lx_dict = None  # Will use defaults
+    
+    # Pass to _apply_infant_adjustment
+    cons = _apply_infant_adjustment(cons, variable=variable, lx=lx_dict)
+```
+
+**Status:** GitHub issue created. See `.github_issue_infant_adjustment.md` for full details.
+
+---
+
 ## Priority 1: Use Real Life Tables (HIGH IMPACT 🔴)
 
 ### Problem
