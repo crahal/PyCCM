@@ -4,7 +4,7 @@
 paths:
   # Base directories for inputs and outputs.
   data_dir: "./data"
-  results_dir: "./julianas_results"
+  results_dir: "./alejandros_results"
   # Optional per-DPTO target TFR overrides; falls back to fertility.default_tfr_target.
   target_tfr_csv: "./data/target_tfrs.csv"
   # Optional per-DPTO midpoint weights for EEVV vs censo; falls back to midpoints.default_eevv_weight.
@@ -118,7 +118,7 @@ runs:
     label_pattern: "{dist}_draw_{i}"
 
 parallel:
-  processes: 20    # increase to use more CPU cores
+  processes: 1   # increase to use more CPU cores
 
 filenames:
   # Input file names (relative to paths.data_dir unless otherwise specified).

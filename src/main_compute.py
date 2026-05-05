@@ -51,19 +51,24 @@ from abridger import (
 ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 CONFIG_PATH = os.path.join(ROOT_DIR, "config.yaml")
 CFG, PATHS = _load_config(ROOT_DIR, CONFIG_PATH)
-# Main process PID for logging guard
-_MAIN_PID = os.getpid()
 
-# Maintenance: clean run (delete results_dir)
-if bool(CFG.get("maintenance", {}).get("clean_run", False)):
+# Process role detection: in spawn workers, __name__ == "__mp_main__".
+_IS_MAIN_PROCESS = (__name__ == "__main__")
+
+# Logging helper: only print from main process 
+def _log(msg: str) -> None:
+    """Print only from the main process (suppress in spawned workers)."""
+    if _IS_MAIN_PROCESS:
+        print(msg)
+
+# Maintenance: clean run - only in main process
+if _IS_MAIN_PROCESS and bool(CFG.get("maintenance", {}).get("clean_run", False)):
     try:
         if os.path.isdir(PATHS["results_dir"]):
             shutil.rmtree(PATHS["results_dir"])
-            if os.getpid() == _MAIN_PID:
-                print(f"[maintenance] Removed results_dir: {PATHS['results_dir']}")
+            _log(f"[maintenance] Removed results_dir: {PATHS['results_dir']}")
     except Exception as e:
-        if os.getpid() == _MAIN_PID:
-            print(f"[maintenance] Warning: failed to remove results_dir ({e}).")
+        _log(f"[maintenance] Warning: failed to remove results_dir ({e}).")
 os.makedirs(PATHS["results_dir"], exist_ok=True)
 
 # Diagnostics
@@ -117,8 +122,7 @@ if UNABR:
     EDAD_ORDER = EXPECTED_BINS[:]
     STEP_YEARS = 1
     PERIOD_YEARS = 1
-    if os.getpid() == _MAIN_PID:
-        print("[pipeline] UNABRIDGED mode: single-year ages & annual projections.")
+    _log("[pipeline] UNABRIDGED mode: single-year ages & annual projections.")
 else:
     AGEB = CFG["age_bins"]
     _exp_bins = _coerce_list(AGEB.get("expected_bins", return_default_config()["age_bins"]["expected_bins"]))
@@ -127,8 +131,7 @@ else:
     EDAD_ORDER = _order if _order is not None else return_default_config()["age_bins"]["order"]
     STEP_YEARS = int(PROJ.get("step_years", 5)) or 5
     PERIOD_YEARS = STEP_YEARS
-    if os.getpid() == _MAIN_PID:
-        print(f"[pipeline] ABRIDGED mode: 5-year ages & projections every {STEP_YEARS} years.")
+    _log(f"[pipeline] ABRIDGED mode: 5-year ages & projections every {STEP_YEARS} years.")
 
 # ---------------- Mortality improvements: CSV reader & parameter merge ----------------
 def _coerce_percent_any(x):
@@ -295,11 +298,9 @@ def _load_supplementaries(paths: dict, *, default_midpoint: float) -> dict:
 
     mort_path = paths.get("mortality_improvements_csv")
     if mort_path and os.path.exists(mort_path) and os.path.getsize(mort_path) > 0 and len(MORT_PARAMS_BY_DPTO) > 0:
-        if os.getpid() == _MAIN_PID:
-            print(f"[mortality] mortality_improvements.csv present at {mort_path}: {len(MORT_PARAMS_BY_DPTO)} DPTO rows loaded.")
+        _log(f"[mortality] mortality_improvements.csv present at {mort_path}: {len(MORT_PARAMS_BY_DPTO)} DPTO rows loaded.")
     else:
-        if os.getpid() == _MAIN_PID:
-            print(f"[mortality] No mortality_improvements CSV found (expected at {mort_path}). Using YAML defaults only.")
+        _log(f"[mortality] No mortality_improvements CSV found (expected at {mort_path}). Using YAML defaults only.")
 
     tfr_path = paths.get("target_tfr_csv")
     if tfr_path and os.path.exists(tfr_path) and os.path.getsize(tfr_path) > 0:
@@ -307,30 +308,52 @@ def _load_supplementaries(paths: dict, *, default_midpoint: float) -> dict:
         out["targets"] = targets
         out["target_conv_years"] = conv_years if conv_years else {}
         n_conv = len(conv_years) if conv_years else 0
-        if os.getpid() == _MAIN_PID:
-            print(f"[fertility] target_tfr_csv present at {tfr_path}: {len(targets)} targets; custom convergence years for {n_conv} DPTO(s).")
+        _log(f"[fertility] target_tfr_csv present at {tfr_path}: {len(targets)} targets; custom convergence years for {n_conv} DPTO(s).")
     else:
-        if os.getpid() == _MAIN_PID:
-            print("[fertility] No target_tfr_csv found (expected at {0}). Defaulting to global target & YAML convergence years."
+        _log("[fertility] No target_tfr_csv found (expected at {0}). Defaulting to global target & YAML convergence years."
                   .format(tfr_path))
 
     mid_path = paths.get("midpoints_csv")
     if mid_path and os.path.exists(mid_path) and os.path.getsize(mid_path) > 0:
         try:
             out["midpoint_weights"] = get_midpoint_weights(mid_path)
-            if os.getpid() == _MAIN_PID:
-                print(f"[midpoint] midpoints_csv present at {mid_path}: {len(out['midpoint_weights'])} DPTO weights loaded; "
+            _log(f"[midpoint] midpoints_csv present at {mid_path}: {len(out['midpoint_weights'])} DPTO weights loaded; "
                       f"default {default_midpoint} used for others.")
         except Exception as e:
-            if os.getpid() == _MAIN_PID:
-                print(f"[midpoint] Warning: failed to read midpoints_csv ({e}); default {default_midpoint} will be used for all DPTOs.")
+            _log(f"[midpoint] Warning: failed to read midpoints_csv ({e}); default {default_midpoint} will be used for all DPTOs.")
             out["midpoint_weights"] = {}
     else:
-        if os.getpid() == _MAIN_PID:
-            print(f"[midpoint] No midpoints_csv found (expected at {mid_path}); using default EEVV weight = {default_midpoint} for all DPTOs.")
+        _log(f"[midpoint] No midpoints_csv found (expected at {mid_path}); using default EEVV weight = {default_midpoint} for all DPTOs.")
     return out
 
 SUPP = _load_supplementaries(PATHS, default_midpoint=DEFAULT_MIDPOINT)
+
+# ---------------------------- Module-level data load --------------------------
+# Loaded once per process. Spawn workers re-load from disk on import (cheap
+# enough; avoids pickling DataFrames per job). Fork workers inherit via COW.
+_data = load_all_data(PATHS["data_dir"])
+conteos = _data["conteos"]
+emi = conteos[conteos["VARIABLE"].isin(["flujo_emigracion"])].copy()
+imi = conteos[conteos["VARIABLE"].isin(["flujo_inmigracion"])].copy()
+
+_original_to_csv = pd.DataFrame.to_csv
+def _dummy_to_csv(self, path_or_buf=None, *args, **kwargs):
+    try:
+        if isinstance(path_or_buf, str) and (
+            "lifetables" in path_or_buf.split(os.sep)
+            or os.path.join("projections") in path_or_buf
+            or "unabridged" in path_or_buf.split(os.sep)
+        ):
+            return None
+    except Exception:
+        pass
+    return _original_to_csv(self, path_or_buf, *args, **kwargs)
+
+pd.DataFrame.to_csv = _dummy_to_csv
+import abridger as _abr_mod, projections as _proj_mod
+_abr_mod.save_unabridged = lambda objs, out_dir: None
+_proj_mod.save_LL = lambda *args, **kwargs: None
+_proj_mod.save_projections = lambda *args, **kwargs: None
 
 # ---------------------------- Aggregator data structures ----------------------------
 lifetable_records: List[pd.DataFrame] = []
@@ -838,68 +861,16 @@ def main_wrapper(conteos, emi, imi, projection_range, sample_type, distribution=
         scen_les_df["ma_window"] = int(MORT_MA_WINDOW_DEFAULT)
         leslie_records.append(scen_les_df)
 
-# ----------------------------------- main -------------------------------------
-if __name__ == "__main__":
-    projection_range = range(START_YEAR, END_YEAR + 1, STEP_YEARS)
-
-    data = load_all_data(PATHS["data_dir"])
-    conteos = data["conteos"]
-
-    mig_names_out = ["flujo_emigracion"]
-    mig_names_in = ["flujo_inmigracion"]
-    emi = conteos[conteos["VARIABLE"].isin(mig_names_out)].copy()
-    imi = conteos[conteos["VARIABLE"].isin(mig_names_in)].copy()
-
-    tasks = []
-    mode = CFG.get("runs", {}).get("mode", "no_draws")
-    if len(sys.argv) > 1 and sys.argv[1] == "draws":
-        mode = "draws"
-
-    if mode == "draws":
-        print("We'll be running this with draws")
-        DRAWS = CFG["runs"]["draws"]
-        num_draws = int(DRAWS.get("num_draws", 1000))
-        dist_types = list(DRAWS.get("dist_types", ["uniform", "pert", "beta", "normal"]))
-        label_pattern = str(DRAWS.get("label_pattern", "{dist}_draw_{i}"))
-        for dist in dist_types:
-            for i in range(num_draws):
-                label = label_pattern.format(dist=dist, i=i)
-                tasks.append(("draw", dist, label))
-    else:
-        print("We'll be running this without draws")
-        NO_DRAWS_TASKS = CFG["runs"]["no_draws_tasks"]
-        for t in NO_DRAWS_TASKS:
-            tasks.append((t["sample_type"], t["distribution"], t["label"]))
-
-    original_to_csv = pd.DataFrame.to_csv
-    def _dummy_to_csv(self, path_or_buf=None, *args, **kwargs):
-        try:
-            if isinstance(path_or_buf, str) and (
-                "lifetables" in path_or_buf.split(os.sep)
-                or os.path.join("projections") in path_or_buf
-                or "unabridged" in path_or_buf.split(os.sep)
-            ):
-                return None
-        except Exception:
-            pass
-        return original_to_csv(self, path_or_buf, *args, **kwargs)
-
-    pd.DataFrame.to_csv = _dummy_to_csv
-    import abridger as _abr_mod, projections as _proj_mod
-    _abr_mod.save_unabridged = lambda objs, out_dir: None
-    _proj_mod.save_LL = lambda *args, **kwargs: None
-    _proj_mod.save_projections = lambda *args, **kwargs: None
-
-    def _execute_task(args):
+# Function at the module level to be called by multiprocessing Pool
+def _execute_task(args):
         sample_type, dist, label, tfr_target, mort_impr, ma_win = args
-        global DEFAULT_TFR_TARGET, MORT_IMPROV_TOTAL_DEFAULT, MORT_MA_WINDOW_DEFAULT, _GLOBAL_PBAR
+        global DEFAULT_TFR_TARGET, MORT_IMPROV_TOTAL_DEFAULT, MORT_MA_WINDOW_DEFAULT
         global lifetable_records, asfr_records, projection_records, leslie_records
         # Set scenario-level defaults for this job
         DEFAULT_TFR_TARGET = float(tfr_target)
         MORT_IMPROV_TOTAL_DEFAULT = float(mort_impr)
         MORT_MA_WINDOW_DEFAULT = int(ma_win)
-        # Disable global progress bar inside workers (parent tracks progress)
-        _GLOBAL_PBAR = None
+  
 
         # Local aggregators per process
         lifetable_records = []
@@ -946,6 +917,7 @@ if __name__ == "__main__":
         else:
             conteos_in = df; emi_in = emi.copy(); imi_in = imi.copy()
 
+        projection_range = range(START_YEAR, END_YEAR + 1, STEP_YEARS)
         if dist is None:
             main_wrapper(conteos_in, emi_in, imi_in, projection_range, label, supp=SUPP)
         else:
@@ -959,28 +931,53 @@ if __name__ == "__main__":
         }
         return out
 
-    def _collect_results(res: dict) -> None:
-        if not res:
-            return
-        if res.get("lifetables") is not None:
-            lifetable_records.append(res["lifetables"])
-        if res.get("asfr") is not None:
-            asfr_records.append(res["asfr"])
-        if res.get("projections") is not None:
-            projection_records.append(res["projections"])
-        if res.get("leslie") is not None:
-            leslie_records.append(res["leslie"])
+def _collect_results(res: dict) -> None:
+    if not res:
+        return
+    if res.get("lifetables") is not None:
+        lifetable_records.append(res["lifetables"])
+    if res.get("asfr") is not None:
+        asfr_records.append(res["asfr"])
+    if res.get("projections") is not None:
+        projection_records.append(res["projections"])
+    if res.get("leslie") is not None:
+        leslie_records.append(res["leslie"])
 
-    def _inclusive_arange(start: float, stop: float, step: float) -> List[float]:
-        if step == 0:
-            return [start]
-        vals = []; v = float(start)
-        if step > 0:
-            while v <= stop + 1e-12: vals.append(v); v += step
-        else:
-            while v >= stop - 1e-12: vals.append(v); v += step
-        if vals: vals[-1] = float(stop)
-        return vals
+def _inclusive_arange(start: float, stop: float, step: float) -> List[float]:
+    if step == 0:
+        return [start]
+    vals = []; v = float(start)
+    if step > 0:
+        while v <= stop + 1e-12: vals.append(v); v += step
+    else:
+        while v >= stop - 1e-12: vals.append(v); v += step
+    if vals: vals[-1] = float(stop)
+    return vals
+# ----------------------------------- main -------------------------------------
+if __name__ == "__main__":
+    projection_range = range(START_YEAR, END_YEAR + 1, STEP_YEARS)
+
+    tasks = []
+    mode = CFG.get("runs", {}).get("mode", "no_draws")
+    if len(sys.argv) > 1 and sys.argv[1] == "draws":
+        mode = "draws"
+
+    if mode == "draws":
+        print("We'll be running this with draws")
+        DRAWS = CFG["runs"]["draws"]
+        num_draws = int(DRAWS.get("num_draws", 1000))
+        dist_types = list(DRAWS.get("dist_types", ["uniform", "pert", "beta", "normal"]))
+        label_pattern = str(DRAWS.get("label_pattern", "{dist}_draw_{i}"))
+        for dist in dist_types:
+            for i in range(num_draws):
+                label = label_pattern.format(dist=dist, i=i)
+                tasks.append(("draw", dist, label))
+    else:
+        print("We'll be running this without draws")
+        NO_DRAWS_TASKS = CFG["runs"]["no_draws_tasks"]
+        for t in NO_DRAWS_TASKS:
+            tasks.append((t["sample_type"], t["distribution"], t["label"]))
+
 
     tr = CFG["fertility"].get("default_tfr_target_range")
     if tr:
@@ -1048,7 +1045,7 @@ if __name__ == "__main__":
             _GLOBAL_PBAR.close()
         _GLOBAL_PBAR = None
 
-    pd.DataFrame.to_csv = original_to_csv
+    pd.DataFrame.to_csv = _original_to_csv
 
     os.makedirs(PATHS["results_dir"], exist_ok=True)
 
